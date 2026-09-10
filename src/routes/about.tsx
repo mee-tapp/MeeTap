@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Phone } from "@/components/phone-mockup";
+import { Reveal } from "@/components/reveal";
 import { istanbulHero } from "@/lib/site-data";
 
 export const Route = createFileRoute("/about")({
@@ -116,30 +117,32 @@ function About() {
   return (
     <main className="text-foreground">
       <section className="site-shell pb-16 pt-14 md:pt-20">
-        <p className="section-label">About MeeTap</p>
-        <h1 className="mt-5 max-w-3xl text-[clamp(2.75rem,6vw,4.5rem)] font-semibold leading-[1.02]">
-          Good places, found the way people actually decide.
-        </h1>
-        <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
-          MeeTap was born in 2026 from a simple frustration: search engines are great at listing
-          places, but terrible at understanding why you're looking. So we built something that
-          starts with your mood, not a search box.
-        </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
-            Founded 2026
-          </Badge>
-          <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
-            Istanbul, Türkiye
-          </Badge>
-          <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
-            Mood-first discovery
-          </Badge>
-        </div>
+        <Reveal>
+          <p className="section-label">About MeeTap</p>
+          <h1 className="mt-5 max-w-3xl text-[clamp(2.75rem,6vw,4.5rem)] font-semibold leading-[1.02]">
+            Good places, found the way people actually decide.
+          </h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-muted-foreground">
+            MeeTap was born in 2026 from a simple frustration: search engines are great at listing
+            places, but terrible at understanding why you're looking. So we built something that
+            starts with your mood, not a search box.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
+              Founded 2026
+            </Badge>
+            <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
+              Istanbul, Türkiye
+            </Badge>
+            <Badge variant="secondary" className="rounded-full px-4 py-1.5 text-xs font-medium">
+              Mood-first discovery
+            </Badge>
+          </div>
+        </Reveal>
       </section>
 
       <section className="site-shell py-10">
-        <div className="grid gap-6 md:grid-cols-3">
+        <Reveal className="grid gap-6 md:grid-cols-3">
           {pillars.map(({ icon: Icon, title, text }) => (
             <article
               key={title}
@@ -152,88 +155,99 @@ function About() {
               <p className="mt-3 text-sm leading-6 text-muted-foreground">{text}</p>
             </article>
           ))}
-        </div>
-      </section>
-
-      <section className="site-shell grid gap-14 py-20 lg:grid-cols-2 lg:items-center">
-        <div>
-          <p className="section-label">Our story</p>
-          <h2 className="mt-4 text-4xl font-semibold leading-tight">Why we built MeeTap.</h2>
-          <div className="mt-6 space-y-4 leading-7 text-muted-foreground">
-            <p>
-              We kept noticing the same pattern: you know exactly how you feel — like catching up
-              with a friend, getting work done, or finding somewhere quiet to be alone — but every
-              map and review app makes you translate that feeling into keywords, filters and endless
-              tabs.
-            </p>
-            <p>
-              MeeTap flips that around. Tell us your mood, your budget and how far you're willing to
-              go, and we do the translating. It's a small shift with a big effect: less searching,
-              more actually going somewhere good.
-            </p>
-            <p>
-              We started in Istanbul because it's a city with endless good places and, honestly, not
-              enough good ways to find them. It's where the idea was tested first, and where MeeTap
-              still feels most at home.
-            </p>
-          </div>
-        </div>
-        <img
-          src={istanbulHero}
-          alt="Istanbul skyline at sunset"
-          loading="lazy"
-          width={1024}
-          height={1280}
-          className="aspect-[4/5] w-full rounded-xl border border-border object-cover shadow-[var(--shadow-card)]"
-        />
+        </Reveal>
       </section>
 
       <section className="site-shell py-20">
-        <p className="section-label text-center">Our journey</p>
-        <h2 className="mt-4 text-center text-4xl font-semibold">Built in 2026.</h2>
-        <div className="relative mt-16">
-          <div className="absolute left-5 top-0 h-full w-px bg-border md:left-0 md:right-0 md:top-5 md:h-px md:w-auto" />
-          <div className="grid gap-10 md:grid-cols-4 md:gap-6">
-            {timeline.map(({ icon: Icon, period, title, text }) => (
-              <div key={period} className="relative flex gap-5 pl-14 md:flex-col md:gap-0 md:pl-0">
-                <span className="absolute left-0 top-0 z-10 flex size-10 items-center justify-center rounded-full border border-border bg-background md:static md:mx-auto">
-                  <Icon className="size-4" />
-                </span>
-                <div className="md:mt-6 md:text-center">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {period}
+        <div className="grid gap-14 lg:grid-cols-2 lg:items-center">
+          <Reveal>
+            <p className="section-label">Our story</p>
+            <h2 className="mt-4 text-4xl font-semibold leading-tight">Why we built MeeTap.</h2>
+            <div className="mt-6 space-y-4 leading-7 text-muted-foreground">
+              <p>
+                We kept noticing the same pattern: you know exactly how you feel — like catching up
+                with a friend, getting work done, or finding somewhere quiet to be alone — but every
+                map and review app makes you translate that feeling into keywords, filters and
+                endless tabs.
+              </p>
+              <p>
+                MeeTap flips that around. Tell us your mood, your budget and how far you're willing
+                to go, and we do the translating. It's a small shift with a big effect: less
+                searching, more actually going somewhere good.
+              </p>
+              <p>
+                We started in Istanbul because it's a city with endless good places and, honestly,
+                not enough good ways to find them. It's where the idea was tested first, and where
+                MeeTap still feels most at home.
+              </p>
+            </div>
+          </Reveal>
+          <Reveal delay={150}>
+            <img
+              src={istanbulHero}
+              alt="Istanbul skyline at sunset"
+              loading="lazy"
+              width={1024}
+              height={1280}
+              className="aspect-[4/5] w-full rounded-xl border border-border object-cover shadow-[var(--shadow-card)]"
+            />
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="site-shell py-20">
+        <Reveal>
+          <p className="section-label text-center">Our journey</p>
+          <h2 className="mt-4 text-center text-4xl font-semibold">Built in 2026.</h2>
+          <div className="relative mt-16">
+            <div className="absolute left-5 top-0 h-full w-px bg-border md:left-0 md:right-0 md:top-5 md:h-px md:w-auto" />
+            <div className="grid gap-10 md:grid-cols-4 md:gap-6">
+              {timeline.map(({ icon: Icon, period, title, text }) => (
+                <div
+                  key={period}
+                  className="relative flex gap-5 pl-14 md:flex-col md:gap-0 md:pl-0"
+                >
+                  <span className="absolute left-0 top-0 z-10 flex size-10 items-center justify-center rounded-full border border-border bg-background md:static md:mx-auto">
+                    <Icon className="size-4" />
                   </span>
-                  <h3 className="mt-1 font-semibold">{title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
+                  <div className="md:mt-6 md:text-center">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {period}
+                    </span>
+                    <h3 className="mt-1 font-semibold">{title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{text}</p>
+                  </div>
                 </div>
-              </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      <section className="site-shell py-20">
+        <Reveal>
+          <p className="section-label">Leadership</p>
+          <h2 className="mt-4 text-4xl font-semibold">The people behind MeeTap.</h2>
+          <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {team.map((member) => (
+              <article
+                key={member.role}
+                className="rounded-lg border border-border bg-card p-6 text-center shadow-[var(--shadow-button)]"
+              >
+                <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-secondary text-xl font-semibold text-secondary-foreground">
+                  {member.initials}
+                </div>
+                <h3 className="mt-4 font-semibold">{member.name}</h3>
+                <p className="text-sm text-muted-foreground">{member.role}</p>
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">{member.note}</p>
+              </article>
             ))}
           </div>
-        </div>
-      </section>
-
-      <section className="site-shell py-20">
-        <p className="section-label">Leadership</p>
-        <h2 className="mt-4 text-4xl font-semibold">The people behind MeeTap.</h2>
-        <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {team.map((member) => (
-            <article
-              key={member.role}
-              className="rounded-lg border border-border bg-card p-6 text-center shadow-[var(--shadow-button)]"
-            >
-              <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-secondary text-xl font-semibold text-secondary-foreground">
-                {member.initials}
-              </div>
-              <h3 className="mt-4 font-semibold">{member.name}</h3>
-              <p className="text-sm text-muted-foreground">{member.role}</p>
-              <p className="mt-3 text-xs leading-5 text-muted-foreground">{member.note}</p>
-            </article>
-          ))}
-        </div>
+        </Reveal>
       </section>
 
       <section id="download" className="site-shell py-20">
-        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-card)]">
+        <Reveal className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-card)]">
           <div className="grid gap-12 p-8 lg:grid-cols-2 lg:p-14">
             <div>
               <Badge
@@ -306,7 +320,7 @@ function About() {
               </div>
             </div>
           </div>
-        </div>
+        </Reveal>
 
         <div className="mt-10 text-center">
           <Button variant="hero" className="rounded-full px-6" asChild>
