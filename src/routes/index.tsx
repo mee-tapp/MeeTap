@@ -98,9 +98,9 @@ function Index() {
             className="mt-5 max-w-[650px] animate-in fade-in slide-in-from-left-8 text-[clamp(3.5rem,6vw,5.8rem)] font-semibold leading-[.98] duration-700 fill-mode-both"
             style={{ animationDelay: "100ms" }}
           >
-            Good places
+            Less hesitation,
             <br />
-            for any mood.
+            more destination.
           </h1>
           <p
             className="mt-6 max-w-xl animate-in fade-in slide-in-from-left-8 text-lg leading-8 text-muted-foreground duration-700 fill-mode-both"
