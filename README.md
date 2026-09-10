@@ -1,4 +1,4 @@
-Meetap
+Meetap - less hesitation, more destination
 Meetap is an AI-powered venue recommendation platform designed to eliminate the common dilemma: "Where should we go?"
 
 Instead of switching back and forth between map services, review platforms, and weather apps, users simply type what they want to do in plain, everyday language. Meetap finds the most practical spots and explains why each place makes sense.
