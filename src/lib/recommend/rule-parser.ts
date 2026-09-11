@@ -1,0 +1,481 @@
+import {
+  emptyIntent,
+  type AmbianceTag,
+  type Category,
+  type Cuisine,
+  type Intent,
+  type Need,
+  type ParsedIntent,
+  type Purpose,
+} from "./intent.ts";
+
+/**
+ * Rule-based Turkish/English intent parser.
+ *
+ * Purpose: zero-cost fallback (and pre-filter) for the LLM parser. It has to
+ * work when the LLM free tier is exhausted or unreachable. It is deliberately
+ * conservative: it only fills fields it is sure about and reports the rest
+ * in `unmapped` so the LLM can take over.
+ */
+
+// --- normalisation ---------------------------------------------------------
+
+const TR_MAP: Record<string, string> = {
+  ç: "c",
+  ğ: "g",
+  ı: "i",
+  ö: "o",
+  ş: "s",
+  ü: "u",
+  â: "a",
+  î: "i",
+  û: "u",
+  Ç: "c",
+  Ğ: "g",
+  İ: "i",
+  I: "i",
+  Ö: "o",
+  Ş: "s",
+  Ü: "u",
+};
+
+/** Lowercase + strip Turkish diacritics so "Sakin" / "sakın" / "SAKIN" all match. */
+export function normalizeTr(input: string): string {
+  return input
+    .replace(/[çğıöşüâîûÇĞİIÖŞÜ]/g, (ch) => TR_MAP[ch] ?? ch)
+    .toLowerCase()
+    .replace(/[’'`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// --- dictionaries (already normalised, longest phrase first when matching) ---
+
+type Dict<T extends string> = Array<[phrases: string[], value: T]>;
+
+const PURPOSE_DICT: Dict<Purpose> = [
+  [
+    [
+      "sevgilim",
+      "kiz arkadasim",
+      "erkek arkadasim",
+      "esimle",
+      "esim ile",
+      "randevu",
+      "date",
+      "flort",
+      "ilk bulusma",
+      "girlfriend",
+      "boyfriend",
+      "my wife",
+      "my husband",
+      "my partner",
+      "date night",
+      "anniversary",
+      "yildonumu",
+    ],
+    "date",
+  ],
+  [
+    [
+      "arkadaslarimla",
+      "arkadaslarim",
+      "arkadasimla",
+      "arkadas",
+      "ekiple",
+      "ekip",
+      "grup",
+      "kankalar",
+      "friends",
+      "with friends",
+    ],
+    "friends",
+  ],
+  [
+    [
+      "ders calis",
+      "calismak",
+      "calisacak",
+      "odev",
+      "laptop",
+      "bilgisayar",
+      "toplanti degil",
+      "study",
+      "work from",
+      "to work",
+      "work for",
+      "get some work done",
+      "remote",
+    ],
+    "study",
+  ],
+  [["yalniz", "tek basima", "kendi basima", "alone", "by myself", "solo"], "alone"],
+  [
+    ["ailemle", "aile", "cocuklarla", "cocukla", "cocuklu", "annemle", "babamla", "family", "kids"],
+    "family",
+  ],
+  [["is yemegi", "musteri", "toplanti", "is gorusmesi", "business", "meeting"], "business"],
+];
+
+const CUISINE_DICT: Dict<Cuisine> = [
+  [["kebap", "kebab", "adana", "urfa", "doner", "durum", "iskender", "ocakbasi"], "kebab"],
+  [
+    [
+      "ev yemekleri",
+      "ev yemegi",
+      "lokanta",
+      "esnaf lokantasi",
+      "sulu yemek",
+      "tencere yemegi",
+      "home cooking",
+      "home-style",
+    ],
+    "home_cooking",
+  ],
+  [["turk mutfagi", "turk yemekleri", "geleneksel", "turkish"], "turkish"],
+  [["meyhane", "raki", "meze", "fasil"], "meyhane"],
+  [["balik", "deniz urunleri", "deniz mahsulleri", "midye", "seafood", "fish"], "seafood"],
+  [["steak", "et restorani", "etci", "kasap", "biftek", "steakhouse"], "steak"],
+  [["burger", "hamburger"], "burger"],
+  [["pizza"], "pizza"],
+  [["italyan", "makarna", "pasta ", "italian"], "italian"],
+  [["sushi", "susi"], "sushi"],
+  [["japon", "ramen", "japanese"], "japanese"],
+  [["cin yemegi", "cin mutfagi", "chinese"], "chinese"],
+  [["asya", "uzak dogu", "tayland", "thai", "kore", "korean", "vietnam", "asian"], "asian"],
+  [["hint", "indian", "curry"], "indian"],
+  [["meksika", "taco", "burrito", "mexican"], "mexican"],
+  [["kahvalti", "serpme", "brunch", "breakfast"], "breakfast"],
+  [["kahve", "coffee", "espresso", "latte", "filtre"], "coffee"],
+  [["cay bahcesi", "cay icmek", "cay ", "tea"], "tea"],
+  [["tatli", "pasta", "dondurma", "kunefe", "baklava", "dessert", "cake"], "dessert"],
+  [["firin", "pastane", "borek", "simit", "bakery"], "bakery"],
+  [["vejetaryen", "vegetarian"], "vegetarian"],
+  [["vegan"], "vegan"],
+  [["azerbaycan", "azeri", "azerbaijani", "milli yemek", "plov", "qutab"], "azerbaijani"],
+  [["gurcu", "georgian", "hacapuri", "khachapuri"], "georgian"],
+];
+
+const AMBIANCE_DICT: Dict<AmbianceTag> = [
+  [
+    [
+      "deniz kenari",
+      "deniz kenarinda",
+      "sahilde",
+      "sahil kenari",
+      "sahil",
+      "kordon",
+      "bogaz kenari",
+      "bogazda",
+      "denize sifir",
+      "seaside",
+      "sea side",
+      "by the sea",
+      "waterfront",
+      "on the coast",
+      "beachside",
+      "deniz kenari",
+    ],
+    "seaside",
+  ],
+  [["canli muzik", "muzik olsun", "live music", "muzikli", "akustik"], "live_music"],
+  [["sakin", "sessiz", "huzurlu", "dingin", "gurultusuz", "quiet", "calm", "peaceful"], "quiet"],
+  [
+    ["canli", "hareketli", "eglenceli", "enerjik", "kalabalik olsun", "lively", "vibrant", "fun"],
+    "lively",
+  ],
+  [["romantik", "romantic", "mum isigi", "ozel gun"], "romantic"],
+  [["samimi", "sicak", "kucuk", "cozy", "sirin", "rahat"], "cozy"],
+  [["manzara", "manzarali", "deniz manzarasi", "bogaz manzarasi", "view", "sea view"], "view"],
+  [
+    ["dis mekan", "acik hava", "bahce", "bahceli", "teras", "outdoor", "terrace", "garden"],
+    "outdoor",
+  ],
+  [["kapali", "ic mekan", "icerisi", "indoor", "inside"], "indoor"],
+  [
+    ["calismaya uygun", "priz", "wifi", "wi-fi", "internet", "work friendly", "laptop"],
+    "work_friendly",
+  ],
+  [
+    [
+      "gruba uygun",
+      "grup icin",
+      "grupla",
+      "grup olarak",
+      "kalabalik grup",
+      "buyuk masa",
+      "group",
+      "gruplar icin",
+    ],
+    "group_friendly",
+  ],
+  [["cocuk dostu", "aile dostu", "family friendly", "kid friendly"], "family_friendly"],
+  [["trendy", "popüler", "populer", "hip", "moda", "instagramlik", "instagram"], "trendy"],
+  [["gece gec", "gec saate", "gece acik", "late night", "gece hayati"], "late_night"],
+  [["fine dining", "sik restoran", "lüks", "luks", "michelin", "gurme", "gourmet"], "fine_dining"],
+  [["ucuz yemek", "sokak lezzeti", "street food", "cheap eats", "esnaf"], "cheap_eats"],
+];
+
+const NEED_DICT: Dict<Need> = [
+  [["wifi", "wi-fi", "internet"], "wifi"],
+  [["priz", "sarj", "power outlet", "outlet"], "power_outlets"],
+  [["vejetaryen", "vegetarian"], "vegetarian"],
+  [["vegan"], "vegan"],
+  [["helal", "halal"], "halal"],
+  [["tekerlekli sandalye", "engelli", "wheelchair", "erisilebilir"], "wheelchair"],
+  [["cocuklu", "bebek arabasi", "cocuk sandalyesi", "kids", "stroller"], "kid_friendly"],
+  [["sigara icilebilen", "sigara alani", "smoking area", "nargile"], "smoking_area"],
+  [["sigarasiz", "sigara icilmeyen", "no smoking", "dumansiz"], "no_smoking"],
+];
+
+const CATEGORY_DICT: Dict<Category> = [
+  [["kafe", "cafe", "kahveci", "coffee shop", "kahve icmek", "cay icmek"], "Cafés"],
+  [
+    [
+      "restoran",
+      "restaurant",
+      "lokanta",
+      "yemek yemek",
+      "yemek yiyelim",
+      "aksam yemegi",
+      "ogle yemegi",
+      "dinner",
+      "lunch",
+      "yemek istiyorum",
+      "yemek istiyoruz",
+    ],
+    "Restaurants",
+  ],
+  [
+    ["bar", "pub", "bira", "kokteyl", "cocktail", "icki", "drinks", "meyhane", "raki", "sarap"],
+    "Bars",
+  ],
+  [
+    [
+      "gezmek",
+      "yuruyus",
+      "muze",
+      "sergi",
+      "park",
+      "aktivite",
+      "etkinlik",
+      "sinema",
+      "tiyatro",
+      "bowling",
+      "activity",
+      "walk",
+      "museum",
+    ],
+    "Activities",
+  ],
+];
+
+// Negation / softening words that flip meaning of the preceding tag.
+const NEGATION_RE = /\b(olmasin|istemiyorum|istemem|olmayan|not|no|without|degil)\b/;
+
+// --- helpers ----------------------------------------------------------------
+
+/**
+ * Match dictionary phrases against text. A matched phrase is consumed so that
+ * a longer phrase listed earlier ("canli muzik" → live_music) prevents a
+ * shorter one inside it ("canli" → lively) from also firing.
+ */
+function findAll<T extends string>(text: string, dict: Dict<T>): T[] {
+  const found = new Set<T>();
+  let work = ` ${text} `;
+  for (const [phrases, value] of dict) {
+    for (const p of phrases) {
+      // Phrase must start at a word boundary ("balik" must not match inside
+      // "kalabalik"), but may carry a Turkish suffix ("kebap" matches "kebapci").
+      const needle = ` ${p.trimStart()}`;
+      if (work.includes(needle)) {
+        found.add(value);
+        work = work.split(needle).join(" ");
+      }
+    }
+  }
+  return [...found];
+}
+
+/** Split into clauses on commas, "ve", "ama", full stops. Keeps "veya"/"ya da" inside a clause. */
+function clauses(text: string): string[] {
+  return text
+    .split(/[,.;!?]|\bve\b|\bama\b|\bfakat\b|\bayrica\b|\band\b|\bbut\b/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
+const OR_RE = /\bveya\b|\bya da\b|\byahut\b|\bor\b/;
+
+function parseBudget(text: string): Intent["budget"] {
+  const budget: Intent["budget"] = { max_per_person: null, level: null, currency: null };
+
+  // "300 tl", "300₺", "300 lira", "kişi başı 400", "50 manat", "40 azn", "$20"
+  const m =
+    text.match(/(\d{2,6})\s*(tl|₺|lira|manat|azn|\$|usd|eur|€)/) ??
+    text.match(/(tl|₺|manat|azn|\$|€)\s*(\d{2,6})/);
+  if (m) {
+    const num = Number(m[1]!.match(/\d/) ? m[1] : m[2]);
+    const cur = (m[1]!.match(/\d/) ? m[2] : m[1]) ?? "";
+    budget.max_per_person = num;
+    budget.currency = /manat|azn/.test(cur)
+      ? "AZN"
+      : /\$|usd/.test(cur)
+        ? "USD"
+        : /€|eur/.test(cur)
+          ? "EUR"
+          : "TRY";
+  } else {
+    // "bütçem 300" without a currency word
+    const b = text.match(/butce(?:m|miz)?\s*(?:ise|:)?\s*(\d{2,6})/);
+    if (b) budget.max_per_person = Number(b[1]);
+  }
+
+  if (
+    /pahali olmasin|cok pahali olmasin|ucuz|uygun fiyat|hesapli|butcem dar|butce dusuk|ogrenci|cheap|budget|affordable|inexpensive/.test(
+      text,
+    )
+  ) {
+    budget.level = "low";
+  } else if (/orta fiyat|orta butce|makul|mid-range|moderate/.test(text)) {
+    budget.level = "mid";
+  } else if (
+    /luks|pahali olsun|fiyat onemli degil|ozel bir yer|fine dining|expensive|splurge|upscale/.test(
+      text,
+    )
+  ) {
+    budget.level = "high";
+  }
+  return budget;
+}
+
+function parseDistance(text: string): Pick<Intent, "transport" | "max_distance_min"> {
+  let transport: Intent["transport"] = null;
+  let max: number | null = null;
+
+  if (/yurume mesafesi|yuruyerek|yuruyus mesafesi|walking distance|on foot/.test(text)) {
+    transport = "walking";
+    max = 20;
+  } else if (/arabayla|araba ile|arac|otopark|by car|drive|parking/.test(text)) {
+    transport = "car";
+  } else if (/metro|otobus|toplu tasima|vapur|tramvay|metrobus|transit|bus|ferry/.test(text)) {
+    transport = "transit";
+  }
+
+  const m = text.match(/(\d{1,3})\s*(dakika|dk|min|minutes?)/);
+  if (m) max = Number(m[1]);
+  else if (/\byakin\b|yakinlarda|yakinda|nearby|close by|near me|hemen yakin/.test(text))
+    max = max ?? 15;
+  else if (/\buzak olmasin\b|not far/.test(text)) max = max ?? 25;
+
+  return { transport, max_distance_min: max };
+}
+
+function parseGroupSize(text: string): number | null {
+  const m = text.match(/(\d{1,2})\s*kisi/) ?? text.match(/(\d{1,2})\s*(people|persons|of us)/);
+  if (m) return Number(m[1]);
+  if (/ikimiz|iki kisi|ciftler/.test(text)) return 2;
+  return null;
+}
+
+function parseTime(text: string): Intent["time"] {
+  if (/bu aksam|aksam|tonight|this evening/.test(text)) return "tonight";
+  if (/yarin|tomorrow/.test(text)) return "tomorrow";
+  if (/hafta sonu|cumartesi|pazar gunu|weekend|saturday|sunday/.test(text)) return "weekend";
+  if (/simdi|hemen|su an|right now|now/.test(text)) return "now";
+  return null;
+}
+
+// --- main -------------------------------------------------------------------
+
+export function parseIntentWithRules(raw: string): ParsedIntent {
+  const text = normalizeTr(raw);
+  const intent: Intent = emptyIntent();
+
+  // Purpose: first match wins; explicit "date" words beat "friends".
+  const purposes = findAll(text, PURPOSE_DICT);
+  intent.purpose = purposes[0] ?? null;
+
+  intent.cuisines = findAll(text, CUISINE_DICT);
+  intent.needs = findAll(text, NEED_DICT);
+  intent.categories = findAll(text, CATEGORY_DICT);
+  // A cuisine request implies a restaurant unless the user said café/bar.
+  if (intent.cuisines.length && intent.categories.length === 0) {
+    const cafeish = intent.cuisines.every((c) =>
+      ["coffee", "tea", "dessert", "bakery", "breakfast"].includes(c),
+    );
+    intent.categories = [cafeish ? "Cafés" : "Restaurants"];
+  }
+
+  // Ambiance with OR-groups and negation, clause by clause.
+  const allOf = new Set<AmbianceTag>();
+  const anyOf: AmbianceTag[][] = [];
+  const avoid = new Set<AmbianceTag>();
+
+  for (const clause of clauses(text)) {
+    // "kalabalık olmasın" → avoid lively ; "gürültülü olmasın" → quiet
+    if (
+      /kalabalik olmasin|kalabalik olmayan|gurultulu olmasin|gurultulu olmayan|gurultu olmasin|not crowded|uncrowded|not loud|not busy/.test(
+        clause,
+      )
+    ) {
+      avoid.add("lively");
+      allOf.add("quiet");
+      continue;
+    }
+    const tags = findAll(clause, AMBIANCE_DICT);
+    if (tags.length === 0) continue;
+    const negated = NEGATION_RE.test(clause) && !/olsun\b/.test(clause.replace(/olmasin/g, ""));
+    if (negated) {
+      for (const t of tags) avoid.add(t);
+    } else if (OR_RE.test(clause) && tags.length >= 2) {
+      anyOf.push(tags);
+    } else {
+      for (const t of tags) allOf.add(t);
+    }
+  }
+  // A tag can't be both required and avoided; "avoid" wins (user was explicit).
+  for (const t of avoid) allOf.delete(t);
+  // "sakin bir yer … sakin olsun veya canlı müzik olsun": the OR statement is the
+  // more specific one, so a tag inside an OR-group is not also a hard requirement.
+  for (const group of anyOf) for (const t of group) allOf.delete(t);
+  intent.ambiance = { all_of: [...allOf], any_of: anyOf, avoid: [...avoid] };
+
+  intent.budget = parseBudget(text);
+  Object.assign(intent, parseDistance(text));
+  intent.group_size = parseGroupSize(text);
+  intent.time = parseTime(text);
+  intent.weather_sensitive =
+    /yagmur|yagiyor|kar yagiyor|soguk|sicak hava|gunesli|hava guzel|ruzgar|rain|raining|snow|cold|sunny|hot outside/.test(
+      text,
+    );
+  if (
+    /yagmur|yagiyor|kar|soguk|rain|snow|cold/.test(text) &&
+    !intent.ambiance.all_of.includes("outdoor")
+  ) {
+    if (!intent.ambiance.all_of.includes("indoor")) intent.ambiance.all_of.push("indoor");
+  }
+  if (
+    /gunesli|hava guzel|sunny|nice weather/.test(text) &&
+    !intent.ambiance.all_of.includes("indoor")
+  ) {
+    if (!intent.ambiance.all_of.includes("outdoor")) intent.ambiance.all_of.push("outdoor");
+  }
+  if (intent.purpose === "friends" && intent.group_size == null) intent.group_size = 3;
+  if (intent.purpose === "date" && intent.group_size == null) intent.group_size = 2;
+
+  // Confidence: how much of the sentence did we actually map?
+  const signals =
+    (intent.purpose ? 1 : 0) +
+    (intent.cuisines.length ? 1 : 0) +
+    (intent.ambiance.all_of.length + intent.ambiance.any_of.length + intent.ambiance.avoid.length
+      ? 1
+      : 0) +
+    (intent.budget.max_per_person || intent.budget.level ? 1 : 0) +
+    (intent.categories.length ? 1 : 0) +
+    (intent.max_distance_min || intent.transport ? 1 : 0);
+  const words = text.split(" ").length;
+  const confidence = Math.min(1, signals / 3) * (words > 40 ? 0.7 : 1);
+
+  return { intent, parser: "rules", raw, confidence };
+}

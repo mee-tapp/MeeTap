@@ -1,0 +1,136 @@
+[
+  {
+    "q": "Sevgilimle sakin bir yerde kebap veya ev yemekleri yemek istiyorum, çok pahalı olmasın, sakin olsun veya canlı müzik olsun",
+    "expect": {
+      "purpose": "date",
+      "cuisines_any": ["kebab", "home_cooking"],
+      "budget_level": "low",
+      "ambiance_any_group": ["quiet", "live_music"]
+    }
+  },
+  {
+    "q": "Arkadaşlarımla yağmurda oturup kahve içecek, wifi'si olan, kalabalık olmasın bir kafe, bütçe 300 tl, yürüme mesafesi",
+    "expect": {
+      "purpose": "friends",
+      "categories": ["Cafés"],
+      "budget_max": 300,
+      "currency": "TRY",
+      "needs": ["wifi"],
+      "avoid": ["lively"],
+      "transport": "walking",
+      "weather_sensitive": true
+    }
+  },
+  {
+    "q": "I want seaside place quiete and i haw low budget",
+    "expect": { "ambiance_all": ["seaside", "quiet"], "budget_level": "low" }
+  },
+  {
+    "q": "Bu akşam 4 kişi manzaralı bir yerde 40 manat civarı balık yiyelim",
+    "expect": {
+      "cuisines_any": ["seafood"],
+      "ambiance_all": ["view"],
+      "budget_max": 40,
+      "currency": "AZN",
+      "group_size": 4,
+      "time": "tonight"
+    }
+  },
+  {
+    "q": "Tek başıma ders çalışacak sessiz bir kafe, priz olsun",
+    "expect": {
+      "purpose": "study",
+      "categories": ["Cafés"],
+      "ambiance_all": ["quiet"],
+      "needs": ["power_outlets"]
+    }
+  },
+  {
+    "q": "Ailemle hafta sonu kahvaltı, çocuk dostu olsun, arabayla gideriz",
+    "expect": {
+      "purpose": "family",
+      "cuisines_any": ["breakfast"],
+      "transport": "car",
+      "time": "weekend"
+    }
+  },
+  {
+    "q": "somewhere romantic for Italian with my girlfriend tonight",
+    "expect": {
+      "purpose": "date",
+      "cuisines_any": ["italian"],
+      "ambiance_all": ["romantic"],
+      "time": "tonight"
+    }
+  },
+  {
+    "q": "Boğaz kenarında rakı balık, meze, 6 kişiyiz",
+    "expect": {
+      "ambiance_all": ["seaside"],
+      "cuisines_any": ["seafood", "meyhane"],
+      "group_size": 6
+    }
+  },
+  {
+    "q": "Öğle arası hızlı ve ucuz bir şeyler yemek istiyorum, yakın olsun",
+    "expect": { "budget_level": "low", "max_distance_max": 20 }
+  },
+  {
+    "q": "İş görüşmesi için sessiz, şık bir restoran, fiyat önemli değil",
+    "expect": { "purpose": "business", "ambiance_all": ["quiet"], "budget_level": "high" }
+  },
+  {
+    "q": "Gece geç saatte açık, canlı müzikli bir bar",
+    "expect": { "categories": ["Bars"], "ambiance_all": ["late_night", "live_music"] }
+  },
+  {
+    "q": "Vegan seçenekleri olan, bahçeli bir kafe",
+    "expect": { "categories": ["Cafés"], "ambiance_all": ["outdoor"], "needs_any": ["vegan"] }
+  },
+  {
+    "q": "Sushi craving, mid-range, walking distance from Taksim",
+    "expect": { "cuisines_any": ["sushi"], "budget_level": "mid", "transport": "walking" }
+  },
+  {
+    "q": "Çocuklarla gidebileceğimiz bir aktivite, kapalı alan olsun çünkü soğuk",
+    "expect": {
+      "purpose": "family",
+      "categories": ["Activities"],
+      "ambiance_all": ["indoor"],
+      "weather_sensitive": true
+    }
+  },
+  {
+    "q": "Hesaplı bir yerde burger",
+    "expect": { "cuisines_any": ["burger"], "budget_level": "low" }
+  },
+  {
+    "q": "Sahilde yürüyüş sonrası çay içecek bir yer",
+    "expect": { "ambiance_all": ["seaside"], "cuisines_any": ["tea"] }
+  },
+  {
+    "q": "quiet cafe with wifi to work for a few hours",
+    "expect": { "purpose": "study", "ambiance_all": ["quiet"], "needs": ["wifi"] }
+  },
+  {
+    "q": "Kız arkadaşımla yıldönümü, romantik ve manzaralı, bütçem kişi başı 1500 tl",
+    "expect": {
+      "purpose": "date",
+      "ambiance_all": ["romantic", "view"],
+      "budget_max": 1500,
+      "currency": "TRY"
+    }
+  },
+  {
+    "q": "Metroyla gidebileceğim, grup için uygun bir meyhane",
+    "expect": {
+      "transport": "transit",
+      "cuisines_any": ["meyhane"],
+      "ambiance_all": ["group_friendly"]
+    }
+  },
+  {
+    "q": "Kalabalık olmayan, sıcak bir yerde tatlı ve kahve",
+    "expect": { "avoid": ["lively"], "cuisines_any": ["dessert", "coffee"] }
+  }
+]

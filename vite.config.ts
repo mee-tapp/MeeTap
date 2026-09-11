@@ -5,6 +5,16 @@
 //     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { loadEnv } from "vite";
+
+// Lovable's config only injects VITE_* variables. Server functions (Supabase
+// service role, DeepSeek) need the rest of .env too, so load it into process.env
+// for the dev/SSR process. In production these are set on the host instead.
+Object.assign(
+  process.env,
+  loadEnv(process.env["NODE_ENV"] ?? "development", process.cwd(), ""),
+  process.env,
+);
 
 export default defineConfig({
   tanstackStart: {

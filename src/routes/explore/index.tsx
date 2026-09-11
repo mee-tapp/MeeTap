@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Building2,
@@ -25,8 +26,9 @@ import {
 import { VenueCard } from "@/components/venue-card";
 import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";
-import { allVenues, categories, cities, purposeTagMap, purposes } from "@/lib/site-data";
+import { categories, cities, purposes } from "@/lib/site-data";
 import { useCity } from "@/lib/city-context";
+import { fetchStats, fetchVenues } from "@/lib/venues/server";
 
 const MAX_BUDGET = 20000;
 const MAX_DISTANCE = 120;
@@ -79,27 +81,56 @@ function Explore() {
       items.includes(name) ? items.filter((item) => item !== name) : [...items, name],
     );
 
-  const cityVenues = useMemo(() => allVenues.filter((venue) => venue.city === city), [city]);
+  // Real venues for this city, filtered on the server (typing is debounced).
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const venuesQuery = useQuery({
+    queryKey: ["venues", city, category, mood, budget, distance, debouncedQuery],
+    queryFn: () =>
+      fetchVenues({
+        data: {
+          city,
+          category,
+          mood,
+          query: debouncedQuery,
+          maxBudget: budget < MAX_BUDGET ? budget : null,
+          maxDistanceMin: distance < MAX_DISTANCE ? distance : null,
+        },
+      }),
+    placeholderData: (previous) => previous,
+  });
+  const cityVenues = useMemo(() => venuesQuery.data?.venues ?? [], [venuesQuery.data]);
+  const totalListed = venuesQuery.data?.total ?? 0;
+
+  const statsQuery = useQuery({
+    queryKey: ["stats", city],
+    queryFn: () => fetchStats({ data: { city } }),
+  });
+  const liveStats = statsQuery.data;
 
   const stats = useMemo(
     () => [
-      { value: `${cityVenues.length * 15}+`, label: "Places listed" },
-      { value: `${cities.length}`, label: "Cities" },
-      { value: "50k+", label: "Explorers" },
-      { value: "4.8", label: "Avg. rating" },
+      { value: `${liveStats?.places ?? totalListed}`, label: "Places listed" },
+      { value: `${liveStats?.cities ?? 0}`, label: "Cities" },
+      { value: `${liveStats?.searches ?? 0}`, label: "Searches" },
+      { value: liveStats?.avgRating ?? "—", label: "Avg. rating" },
     ],
-    [cityVenues],
+    [liveStats, totalListed],
   );
 
   const featured = useMemo(() => cityVenues.slice(0, 4), [cityVenues]);
 
   const filtered = useMemo(() => {
-    const moodTags = mood ? (purposeTagMap[mood] ?? []) : null;
+    // Mood, budget and distance are already applied on the server; this keeps
+    // the list consistent while a new query is loading.
     return cityVenues.filter((venue) => {
       if (category !== "All" && venue.category !== category) return false;
       if (venue.budget > budget) return false;
       if (Number.parseInt(venue.time, 10) > distance) return false;
-      if (moodTags && !venue.tags.some((tag) => moodTags.includes(tag))) return false;
       if (
         query &&
         !venue.name.toLowerCase().includes(query.toLowerCase()) &&
@@ -108,7 +139,7 @@ function Explore() {
         return false;
       return true;
     });
-  }, [cityVenues, category, budget, distance, mood, query]);
+  }, [cityVenues, category, budget, distance, query]);
 
   return (
     <main className="text-foreground">
@@ -313,6 +344,10 @@ function Explore() {
                 />
               ))}
             </div>
+          ) : venuesQuery.isPending ? (
+            <div className="mt-9 rounded-lg border border-dashed border-border bg-card/50 px-6 py-16 text-center">
+              <p className="font-semibold">Finding places in {city}…</p>
+            </div>
           ) : (
             <div className="mt-9 rounded-lg border border-dashed border-border bg-card/50 px-6 py-16 text-center">
               <p className="font-semibold">No places match those filters yet.</p>
@@ -358,6 +393,11 @@ function Explore() {
                   className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
+                {cityOption.comingSoon && (
+                  <span className="absolute left-3 top-3 rounded-full bg-background/80 px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm">
+                    Coming soon
+                  </span>
+                )}
                 <div className="absolute bottom-4 left-4">
                   <h3 className="font-semibold">{cityOption.name}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">{cityOption.note}</p>
@@ -381,11 +421,12 @@ function Explore() {
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Star className="size-4 fill-warm text-warm" /> 4.8{" "}
+              <Star className="size-4 fill-warm text-warm" /> {liveStats?.avgRating ?? "—"}{" "}
               <span className="text-xs">rating</span>
             </div>
             <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <Users className="size-4" /> 50k+
+              <Users className="size-4" /> {liveStats?.reviews ?? 0}{" "}
+              <span className="text-xs">reviews</span>
             </div>
           </div>
           <Button variant="hero" className="w-full rounded-full px-6 sm:w-auto" asChild>

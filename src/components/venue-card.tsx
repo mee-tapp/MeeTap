@@ -2,6 +2,7 @@ import { Heart, MapPin, Star } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
+import { VenuePlaceholder } from "@/components/venue-placeholder";
 import type { Venue } from "@/lib/site-data";
 
 export function VenueCard({
@@ -21,14 +22,18 @@ export function VenueCard({
       className="group cursor-pointer overflow-hidden rounded-lg border border-border bg-card shadow-[var(--shadow-button)] transition-shadow hover:shadow-[var(--shadow-card)]"
     >
       <div className="relative aspect-[4/3] overflow-hidden">
-        <img
-          src={venue.image}
-          alt={`${venue.name} interior`}
-          loading="lazy"
-          width={1280}
-          height={800}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-        />
+        {venue.image ? (
+          <img
+            src={venue.image}
+            alt={`${venue.name} interior`}
+            loading="lazy"
+            width={1280}
+            height={800}
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          />
+        ) : (
+          <VenuePlaceholder category={venue.category} />
+        )}
         <Button
           size="icon"
           variant="glass"
@@ -57,9 +62,18 @@ export function VenueCard({
           </Link>
         </h3>
         <div className="mt-2 flex items-center gap-2 text-xs">
-          <Star className="size-4 fill-warm text-warm" />
-          <strong>{venue.rating}</strong>
-          <span className="text-muted-foreground">({venue.reviews})</span>
+          {venue.rating ? (
+            <>
+              <Star className="size-4 fill-warm text-warm" />
+              <strong>{venue.rating}</strong>
+              <span className="text-muted-foreground">({venue.reviews})</span>
+            </>
+          ) : (
+            <>
+              <Star className="size-4 text-muted-foreground" />
+              <span className="text-muted-foreground">No ratings yet</span>
+            </>
+          )}
           <span className="text-muted-foreground">·</span>
           <MapPin className="size-3 text-muted-foreground" />
           <span className="text-muted-foreground">{venue.time}</span>

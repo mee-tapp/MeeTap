@@ -15,10 +15,13 @@ export type Review = {
 };
 
 export type Venue = {
+  id?: string;
   slug: string;
   name: string;
-  image: string;
-  rating: string;
+  /** null = no photo yet (real venues come without photos for now) */
+  image: string | null;
+  /** null = no ratings yet */
+  rating: string | null;
   reviews: string;
   time: string;
   budget: number;
@@ -28,6 +31,10 @@ export type Venue = {
   city: string;
   ratingBreakdown: number[];
   reviewList: Review[];
+  currency?: string;
+  website?: string | null;
+  lat?: number;
+  lon?: number;
 };
 
 export const purposes = [
@@ -38,10 +45,10 @@ export const purposes = [
 ];
 
 export const purposeTagMap: Record<string, string[]> = {
-  Date: ["Date friendly", "Amazing view", "Rooftop", "Dinner"],
-  Friends: ["Great for conversations", "Lively", "Great for groups", "Spacious"],
-  Study: ["Good for working", "Cozy", "Spacious"],
-  Alone: ["Cozy", "Calm", "Scenic"],
+  Date: ["Romantic", "Quiet", "Great view", "Cozy"],
+  Friends: ["Lively", "Great for groups"],
+  Study: ["Good for working", "Quiet"],
+  Alone: ["Cozy", "Quiet"],
 };
 
 export const venues: Venue[] = [
@@ -469,9 +476,9 @@ export const allVenues: Venue[] = [...venues, ...moreVenues, ...bakuVenues];
 export const categories = ["All", "Cafés", "Restaurants", "Activities", "Bars"];
 
 export const cities = [
-  { name: "Istanbul", note: "Vibrant & timeless", image: istanbulHero },
-  { name: "London", note: "Classic & modern", image: venueMirth },
-  { name: "New York", note: "Always something new", image: venueNola },
-  { name: "Barcelona", note: "Sun, culture & more", image: venueKronotrop },
-  { name: "Paris", note: "A city of moods", image: istanbulHero },
+  { name: "Istanbul", note: "Vibrant & timeless", image: istanbulHero, comingSoon: false },
+  { name: "London", note: "Classic & modern", image: venueMirth, comingSoon: true },
+  { name: "New York", note: "Always something new", image: venueNola, comingSoon: true },
+  { name: "Barcelona", note: "Sun, culture & more", image: venueKronotrop, comingSoon: true },
+  { name: "Paris", note: "A city of moods", image: istanbulHero, comingSoon: true },
 ];

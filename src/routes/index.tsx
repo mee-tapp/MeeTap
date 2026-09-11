@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   ArrowRight,
   Cloud,
@@ -17,14 +18,16 @@ import { Button } from "@/components/ui/button";
 import { Reveal } from "@/components/reveal";
 import { CityMap } from "@/components/city-map";
 import { VenueCard } from "@/components/venue-card";
+import { VenuePlaceholder } from "@/components/venue-placeholder";
+import { istanbulHero, venueMirth, venueNola, venueKronotrop } from "@/lib/site-data";
+import { useCity } from "@/lib/city-context";
 import {
-  allVenues,
-  venues,
-  istanbulHero,
-  venueMirth,
-  venueNola,
-  venueKronotrop,
-} from "@/lib/site-data";
+  CURRENCY_SYMBOL,
+  fetchFeatured,
+  fetchStats,
+  logRecommendationClick,
+  recommendVenues,
+} from "@/lib/venues/server";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -53,20 +56,36 @@ const discoveryCategories = [
   { label: "Near You", icon: MapPin },
 ];
 
-const featuredPicks = allVenues.filter((venue) =>
-  ["lacivert", "bosphorus-cruise", "rooftop-sunset"].includes(venue.slug),
-);
-
-const mapPins = [
-  { venue: venues[0]!, left: "14%", top: "28%" },
-  { venue: venues[1]!, left: "38%", top: "68%" },
-  { venue: venues[2]!, left: "64%", top: "25%" },
-  { venue: venues[3]!, left: "86%", top: "65%" },
+const pinPositions = [
+  { left: "14%", top: "28%" },
+  { left: "38%", top: "68%" },
+  { left: "64%", top: "25%" },
+  { left: "86%", top: "65%" },
 ];
 
-const foundVenue = featuredPicks[0]!;
+type RecommendResponse = Awaited<ReturnType<typeof recommendVenues>>;
+
+/** Ask once for the user's position; fall back to the city centre on deny/timeout. */
+function getPosition(timeoutMs = 3500): Promise<{ lat: number; lon: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+      { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 5 * 60 * 1000 },
+    );
+  });
+}
 
 function Index() {
+  const { city } = useCity();
   const [query, setQuery] = useState("");
   const [discoverySaved, setDiscoverySaved] = useState<string[]>([]);
   const toggleDiscoverySaved = (name: string) =>
@@ -74,12 +93,49 @@ function Index() {
       items.includes(name) ? items.filter((item) => item !== name) : [...items, name],
     );
   const [heroPhase, setHeroPhase] = useState<"idle" | "searching" | "done">("idle");
+  const [result, setResult] = useState<RecommendResponse | null>(null);
 
-  useEffect(() => {
-    if (heroPhase !== "searching") return;
-    const t = setTimeout(() => setHeroPhase("done"), 1500);
-    return () => clearTimeout(t);
-  }, [heroPhase]);
+  // Real featured venues for the selected city (photo-less until photos exist).
+  const featuredQuery = useQuery({
+    queryKey: ["featured", city],
+    queryFn: () => fetchFeatured({ data: { city, limit: 3 } }),
+  });
+  const featuredPicks = featuredQuery.data ?? [];
+  const statsQuery = useQuery({
+    queryKey: ["stats", city],
+    queryFn: () => fetchStats({ data: { city } }),
+  });
+  const searchCount = statsQuery.data?.searches ?? 0;
+  const mapPins = pinPositions
+    .map((position, index) => ({ ...position, venue: featuredPicks[index] }))
+    .filter((pin) => pin.venue);
+
+  const runSearch = async () => {
+    setHeroPhase("searching");
+    try {
+      // Keep the scanning animation visible for at least a beat.
+      const position = await getPosition();
+      const [response] = await Promise.all([
+        recommendVenues({
+          data: {
+            query: query.trim(),
+            city,
+            limit: 3,
+            lat: position?.lat ?? null,
+            lon: position?.lon ?? null,
+          },
+        }),
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
+      setResult(response);
+    } catch {
+      setResult(null);
+    }
+    setHeroPhase("done");
+  };
+  const foundVenues = result?.results ?? [];
+  const foundVenue = foundVenues[0];
+  const currencySymbol = foundVenue ? (CURRENCY_SYMBOL[foundVenue.currency ?? "TRY"] ?? "") : "";
 
   return (
     <main className="min-h-screen overflow-hidden text-foreground">
@@ -114,8 +170,8 @@ function Index() {
             style={{ animationDelay: "340ms" }}
             onSubmit={(event) => {
               event.preventDefault();
-              if (!query.trim()) return;
-              setHeroPhase("searching");
+              if (!query.trim() || heroPhase === "searching") return;
+              void runSearch();
             }}
           >
             <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -149,8 +205,8 @@ function Index() {
 
               {mapPins.map(({ venue, left, top }) => (
                 <span
-                  key={venue.slug}
-                  title={venue.name}
+                  key={venue!.slug}
+                  title={venue!.name}
                   className="absolute flex -translate-x-1/2 -translate-y-full items-center justify-center text-muted-foreground"
                   style={{ left, top }}
                 >
@@ -171,34 +227,83 @@ function Index() {
             </div>
           )}
 
-          {heroPhase === "done" && (
+          {heroPhase === "done" && foundVenue && (
             <div className="mt-4 max-w-xl animate-in fade-in slide-in-from-bottom-2 rounded-lg border border-border bg-card/70 p-4 duration-500">
-              <div className="flex items-center gap-3">
-                <img
-                  src={foundVenue.image}
-                  alt={`${foundVenue.name} interior`}
-                  width={96}
-                  height={96}
-                  className="size-12 shrink-0 rounded-lg object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{foundVenue.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    A popular pick while we fine-tune your match
-                  </p>
-                </div>
-                <Button size="sm" variant="hero" className="shrink-0 rounded-full" asChild>
-                  <Link to="/explore/$slug" params={{ slug: foundVenue.slug }}>
-                    View
-                  </Link>
-                </Button>
+              <div className="space-y-3">
+                {foundVenues.map((venue, index) => (
+                  <div key={venue.slug} className="flex items-center gap-3">
+                    {venue.image ? (
+                      <img
+                        src={venue.image}
+                        alt={`${venue.name} interior`}
+                        width={96}
+                        height={96}
+                        className="size-12 shrink-0 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <span className="size-12 shrink-0 overflow-hidden rounded-lg">
+                        <VenuePlaceholder category={venue.category} iconClassName="size-5" />
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">
+                        <span className="mr-1.5 text-muted-foreground">{index + 1}.</span>
+                        {venue.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{venue.detail}</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={index === 0 ? "hero" : "glass"}
+                      className="shrink-0 rounded-full"
+                      asChild
+                    >
+                      <Link
+                        to="/explore/$slug"
+                        params={{ slug: venue.slug }}
+                        onClick={() => {
+                          if (result?.query_log_id && venue.id) {
+                            void logRecommendationClick({
+                              data: { queryLogId: result.query_log_id, venueId: venue.id },
+                            }).catch(() => {});
+                          }
+                        }}
+                      >
+                        View
+                      </Link>
+                    </Button>
+                  </div>
+                ))}
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <Context icon={MapPin} value="Istanbul" sub={foundVenue.tags[0] ?? "Nearby"} />
-                <Context icon={Cloud} value="18°C" sub="Cloudy today" />
-                <Context icon={Wallet} value={`₺ ${foundVenue.budget}`} sub="Budget" />
-                <Context icon={Footprints} value={foundVenue.time} sub="Distance" />
+                <Context icon={MapPin} value={city} sub={foundVenue.tags[0] ?? "Nearby"} />
+                <Context
+                  icon={Cloud}
+                  value={
+                    result?.weather?.temp_c != null ? `${Math.round(result.weather.temp_c)}°C` : "—"
+                  }
+                  sub={result?.weather?.label ?? "Weather unavailable"}
+                />
+                <Context
+                  icon={Wallet}
+                  value={`${currencySymbol} ${foundVenue.budget}`}
+                  sub="Budget (est.)"
+                />
+                <Context
+                  icon={Footprints}
+                  value={foundVenue.time}
+                  sub={result?.origin.source === "user" ? "From you" : "From city centre"}
+                />
               </div>
+            </div>
+          )}
+
+          {heroPhase === "done" && !foundVenue && (
+            <div className="mt-4 max-w-xl animate-in fade-in slide-in-from-bottom-2 rounded-lg border border-border bg-card/70 p-4 duration-500">
+              <p className="text-sm font-semibold">No matching places yet.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Try describing what you want a little differently, or switch city.
+              </p>
             </div>
           )}
         </div>
@@ -331,7 +436,9 @@ function Index() {
               />
             ))}
           </div>
-          <span className="text-sm text-muted-foreground">Join 50,000+ explorers</span>
+          <span className="text-sm text-muted-foreground">
+            {searchCount.toLocaleString("en-US")} searches and counting
+          </span>
         </div>
       </section>
     </main>

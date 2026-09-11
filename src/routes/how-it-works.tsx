@@ -2,10 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Loader2, MapPin, MousePointer2, Search, Star } from "lucide-react";
 
+import { useQuery } from "@tanstack/react-query";
+
 import { Button } from "@/components/ui/button";
 import { Reveal } from "@/components/reveal";
+import { VenuePlaceholder } from "@/components/venue-placeholder";
 import { useInView } from "@/hooks/use-in-view";
-import { venueKronotrop, venueMirth, venueNola } from "@/lib/site-data";
+import { useCity } from "@/lib/city-context";
+import { recommendVenues } from "@/lib/venues/server";
 
 export const Route = createFileRoute("/how-it-works")({
   head: () => ({
@@ -33,33 +37,8 @@ const TYPE_SPEED = 45;
 
 type Phase = "idle" | "typing" | "searching" | "results" | "selecting" | "detail";
 
-const demoResults = [
-  {
-    name: "Trattoria Lucca",
-    image: venueNola,
-    rating: "4.8",
-    time: "6 min",
-    tags: ["Romantic", "Wood-fired pizza"],
-    detail: "Candlelit tables, a wood-fired oven, and a wine list that never misses.",
-  },
-  {
-    name: "Nonna's Table",
-    image: venueKronotrop,
-    rating: "4.7",
-    time: "9 min",
-    tags: ["Family-run", "Fresh pasta"],
-    detail: "Handmade pasta every morning, recipes passed down three generations.",
-  },
-  {
-    name: "Bella Vista",
-    image: venueMirth,
-    rating: "4.6",
-    time: "12 min",
-    tags: ["Rooftop", "Date night"],
-    detail: "Italian classics with a skyline view — go for sunset, stay for tiramisu.",
-  },
-];
-
+// The demo runs the real engine on the sentence above (rule parser, no LLM
+// cost) so the three cards are actual venues in the selected city.
 const SELECTED_INDEX = 1;
 
 const captions: Record<Phase, string> = {
@@ -116,9 +95,17 @@ function HowItWorks() {
 
 function DemoSection() {
   const { ref, inView } = useInView<HTMLDivElement>(0.4);
+  const { city } = useCity();
   const [phase, setPhase] = useState<Phase>("idle");
   const [typedText, setTypedText] = useState("");
   const started = useRef(false);
+
+  const demoQuery = useQuery({
+    queryKey: ["demo", city],
+    queryFn: () => recommendVenues({ data: { query: TYPE_TEXT, city, limit: 3, parser: "rules" } }),
+    staleTime: 10 * 60 * 1000,
+  });
+  const demoResults = demoQuery.data?.results ?? [];
 
   useEffect(() => {
     if (!inView || started.current) return;
@@ -162,7 +149,7 @@ function DemoSection() {
   }, [phase]);
 
   const resultsVisible = phase === "results" || phase === "selecting" || phase === "detail";
-  const selected = demoResults[SELECTED_INDEX]!;
+  const selected = demoResults[SELECTED_INDEX] ?? demoResults[0];
 
   return (
     <div className="grid gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
@@ -237,19 +224,31 @@ function DemoSection() {
                       style={{ animationDelay: `${index * 150}ms` }}
                     >
                       <div className="relative aspect-[4/3] overflow-hidden">
-                        <img
-                          src={venue.image}
-                          alt={`${venue.name} interior`}
-                          loading="lazy"
-                          width={640}
-                          height={480}
-                          className="h-full w-full object-cover"
-                        />
+                        {venue.image ? (
+                          <img
+                            src={venue.image}
+                            alt={`${venue.name} interior`}
+                            loading="lazy"
+                            width={640}
+                            height={480}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <VenuePlaceholder category={venue.category} iconClassName="size-6" />
+                        )}
                       </div>
                       <div className="p-3">
                         <h3 className="text-sm font-semibold">{venue.name}</h3>
                         <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                          <Star className="size-3 fill-warm text-warm" /> {venue.rating}
+                          {venue.rating ? (
+                            <>
+                              <Star className="size-3 fill-warm text-warm" /> {venue.rating}
+                            </>
+                          ) : (
+                            <>
+                              <Star className="size-3" /> No ratings yet
+                            </>
+                          )}
                           <span>·</span>
                           <MapPin className="size-3" /> {venue.time}
                         </div>
@@ -261,20 +260,34 @@ function DemoSection() {
             </div>
           )}
 
-          {phase === "detail" && (
+          {phase === "detail" && selected && (
             <div className="mt-4 animate-in fade-in slide-in-from-bottom-4 rounded-lg border border-border bg-card p-5 shadow-[var(--shadow-button)] duration-500">
               <div className="flex gap-4">
-                <img
-                  src={selected.image}
-                  alt={`${selected.name} interior`}
-                  width={200}
-                  height={200}
-                  className="size-20 shrink-0 rounded-lg object-cover"
-                />
+                {selected.image ? (
+                  <img
+                    src={selected.image}
+                    alt={`${selected.name} interior`}
+                    width={200}
+                    height={200}
+                    className="size-20 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <span className="size-20 shrink-0 overflow-hidden rounded-lg">
+                    <VenuePlaceholder category={selected.category} iconClassName="size-7" />
+                  </span>
+                )}
                 <div className="min-w-0">
                   <h3 className="font-semibold">{selected.name}</h3>
                   <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Star className="size-3.5 fill-warm text-warm" /> {selected.rating}
+                    {selected.rating ? (
+                      <>
+                        <Star className="size-3.5 fill-warm text-warm" /> {selected.rating}
+                      </>
+                    ) : (
+                      <>
+                        <Star className="size-3.5" /> No ratings yet
+                      </>
+                    )}
                     <span>·</span>
                     <MapPin className="size-3.5" /> {selected.time}
                   </div>

@@ -3,11 +3,13 @@ import { useState } from "react";
 import { ArrowLeft, ArrowRight, Heart, MapPin, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { allVenues, type Review } from "@/lib/site-data";
+import { VenuePlaceholder } from "@/components/venue-placeholder";
+import type { Review } from "@/lib/site-data";
+import { fetchVenue, submitReview as submitReviewFn } from "@/lib/venues/server";
 
 export const Route = createFileRoute("/explore/$slug")({
-  loader: ({ params }) => {
-    const venue = allVenues.find((item) => item.slug === params.slug);
+  loader: async ({ params }) => {
+    const venue = await fetchVenue({ data: { slug: params.slug } });
     if (!venue) throw notFound();
     return venue;
   },
@@ -38,19 +40,40 @@ function VenueDetail() {
   const venue = Route.useLoaderData();
   const [saved, setSaved] = useState(false);
   const [reviews, setReviews] = useState<Review[]>(venue.reviewList);
+  const [summary, setSummary] = useState({
+    rating: venue.rating,
+    reviews: venue.reviews,
+    breakdown: venue.ratingBreakdown,
+  });
   const [userRating, setUserRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [comment, setComment] = useState("");
+  const [authorName, setAuthorName] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const submitReview = () => {
-    if (!userRating) return;
-    setReviews((current) => [
-      { name: "You", rating: userRating, date: "Just now", comment: comment || "No comment left." },
-      ...current,
-    ]);
-    setSubmitted(true);
-    setComment("");
+  const submitReview = async () => {
+    if (!userRating || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const saved = await submitReviewFn({
+        data: { slug: venue.slug, rating: userRating, comment, name: authorName },
+      });
+      setReviews(saved.reviewList);
+      setSummary({
+        rating: saved.rating,
+        reviews: saved.reviews,
+        breakdown: saved.ratingBreakdown,
+      });
+      setSubmitted(true);
+      setComment("");
+    } catch {
+      setSubmitError("Could not save your review. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -65,14 +88,18 @@ function VenueDetail() {
 
       <section className="site-shell grid gap-10 pb-16 lg:grid-cols-[1.1fr_.9fr] lg:items-center">
         <div className="relative aspect-[16/10] overflow-hidden rounded-xl border border-border shadow-[var(--shadow-card)]">
-          <img
-            src={venue.image}
-            alt={`${venue.name} interior`}
-            loading="eager"
-            width={1280}
-            height={800}
-            className="h-full w-full object-cover"
-          />
+          {venue.image ? (
+            <img
+              src={venue.image}
+              alt={`${venue.name} interior`}
+              loading="eager"
+              width={1280}
+              height={800}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <VenuePlaceholder category={venue.category} iconClassName="size-14" />
+          )}
           <Button
             size="icon"
             variant="glass"
@@ -90,10 +117,18 @@ function VenueDetail() {
         <div>
           <h1 className="text-4xl font-semibold leading-tight md:text-5xl">{venue.name}</h1>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-            <span className="flex items-center gap-1 font-semibold">
-              <Star className="size-4 fill-warm text-warm" /> {venue.rating}
-            </span>
-            <span className="text-muted-foreground">({venue.reviews} reviews)</span>
+            {summary.rating ? (
+              <>
+                <span className="flex items-center gap-1 font-semibold">
+                  <Star className="size-4 fill-warm text-warm" /> {summary.rating}
+                </span>
+                <span className="text-muted-foreground">({summary.reviews} reviews)</span>
+              </>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <Star className="size-4" /> No ratings yet
+              </span>
+            )}
             <span className="text-muted-foreground">·</span>
             <span className="flex items-center gap-1 text-muted-foreground">
               <MapPin className="size-3.5" /> {venue.time}
@@ -126,9 +161,11 @@ function VenueDetail() {
       <section className="site-shell grid gap-14 pb-24 lg:grid-cols-[.85fr_1.15fr]">
         <div>
           <p className="section-label">Rating breakdown</p>
-          <h2 className="mt-3 text-2xl font-semibold">{venue.rating} out of 5</h2>
+          <h2 className="mt-3 text-2xl font-semibold">
+            {summary.rating ? `${summary.rating} out of 5` : "No ratings yet"}
+          </h2>
           <div className="mt-6 space-y-3">
-            {venue.ratingBreakdown.map((percent, index) => {
+            {summary.breakdown.map((percent, index) => {
               const star = 5 - index;
               return (
                 <div key={star} className="flex items-center gap-3 text-xs">
@@ -161,24 +198,37 @@ function VenueDetail() {
                 </button>
               ))}
             </div>
+            <input
+              value={authorName}
+              onChange={(event) => setAuthorName(event.target.value)}
+              placeholder="Your name (optional)"
+              maxLength={60}
+              className="mt-4 w-full rounded-lg border border-border bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label="Your name"
+            />
             <textarea
               value={comment}
               onChange={(event) => setComment(event.target.value)}
               placeholder="Share your experience..."
               rows={3}
-              className="mt-4 w-full rounded-lg border border-border bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              className="mt-3 w-full rounded-lg border border-border bg-transparent p-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
             />
             <Button
               variant="hero"
               className="mt-3 rounded-full px-6"
-              disabled={!userRating}
+              disabled={!userRating || submitting}
               onClick={submitReview}
             >
-              Submit review
+              {submitting ? "Saving…" : "Submit review"}
             </Button>
             {submitted && (
               <p className="mt-3 text-sm text-muted-foreground" role="status">
                 Thanks for rating! You gave {userRating} star{userRating > 1 ? "s" : ""}.
+              </p>
+            )}
+            {submitError && (
+              <p className="mt-3 text-sm text-destructive" role="alert">
+                {submitError}
               </p>
             )}
           </div>
@@ -188,6 +238,14 @@ function VenueDetail() {
           <p className="section-label">Reviews</p>
           <h2 className="mt-3 text-2xl font-semibold">What people are saying</h2>
           <div className="mt-6 space-y-4">
+            {reviews.length === 0 && (
+              <div className="rounded-lg border border-dashed border-border bg-card/50 p-8 text-center">
+                <p className="font-semibold">No reviews yet.</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Be the first to review {venue.name} — rate it on the left.
+                </p>
+              </div>
+            )}
             {reviews.map((review, index) => (
               <div
                 key={`${review.name}-${index}`}
