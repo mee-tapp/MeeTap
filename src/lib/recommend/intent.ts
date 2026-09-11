@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ASPECT_KEYS, CAUTION_TAGS } from "./venue-intelligence.ts";
+
 /**
  * Structured intent – the contract between the parser (LLM or rules)
  * and the scorer. Everything the user *means* ends up here; the scorer
@@ -109,6 +111,28 @@ export const IntentSchema = z.object({
   weather_sensitive: z.boolean().default(false),
   /** Free-text bits we could not map; surfaced to the LLM path and to logs. */
   unmapped: z.array(z.string()).default([]),
+  /**
+   * How confident the parse is (copied in from `ParsedIntent.confidence` by the
+   * engine) – lets the scorer soften hard filters when a guess is shaky instead
+   * of excluding candidates on an uncertain read of the sentence.
+   */
+  confidence: z.number().min(0).max(1).default(1),
+  /**
+   * Subjective/review-evidence priorities ("yemekleri iyi" → food_quality,
+   * "servisi iyi" → service). Never a candidate filter – purely a ranking
+   * signal, and only meaningful when a venue actually has Venue Intelligence
+   * data (src/lib/recommend/venue-intelligence.ts). Reuses that module's
+   * controlled vocabulary instead of a second one.
+   */
+  review_priorities: z.array(z.enum(ASPECT_KEYS)).default([]),
+  /** Things reviews should NOT say ("kalabalık olmasın" → crowded). Same rules as above. */
+  review_avoid: z.array(z.enum(CAUTION_TAGS)).default([]),
+  /**
+   * False when `categories` was only inferred from a cuisine word (e.g. "kebap"
+   * implying Restaurants) rather than the user naming a café/restaurant/bar/
+   * activity explicitly. Inferred categories should widen retrieval, not gate it.
+   */
+  category_explicit: z.boolean().default(true),
 });
 
 export type Intent = z.infer<typeof IntentSchema>;

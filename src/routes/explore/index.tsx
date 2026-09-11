@@ -300,11 +300,11 @@ function Explore() {
           <Carousel className="mt-8" opts={{ align: "start", loop: true }}>
             <CarouselContent>
               {featured.map((venue) => (
-                <CarouselItem key={venue.name} className="sm:basis-1/2 lg:basis-1/3">
+                <CarouselItem key={venue.slug} className="sm:basis-1/2 lg:basis-1/3">
                   <VenueCard
                     venue={venue}
-                    saved={saved.includes(venue.name)}
-                    onSave={() => toggleSaved(venue.name)}
+                    saved={saved.includes(venue.slug)}
+                    onSave={() => toggleSaved(venue.slug)}
                   />
                 </CarouselItem>
               ))}
@@ -337,10 +337,10 @@ function Explore() {
             <div className="mt-9 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {filtered.map((venue) => (
                 <VenueCard
-                  key={venue.name}
+                  key={venue.slug}
                   venue={venue}
-                  saved={saved.includes(venue.name)}
-                  onSave={() => toggleSaved(venue.name)}
+                  saved={saved.includes(venue.slug)}
+                  onSave={() => toggleSaved(venue.slug)}
                 />
               ))}
             </div>

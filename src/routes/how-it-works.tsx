@@ -219,7 +219,7 @@ function DemoSection() {
                   const isSelecting = phase === "selecting" && isTarget;
                   return (
                     <div
-                      key={venue.name}
+                      key={venue.slug}
                       className={`relative animate-in fade-in slide-in-from-bottom-4 overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-button)] transition-all duration-500 fill-mode-both ${isSelecting ? "border-primary ring-2 ring-primary" : "border-border"}`}
                       style={{ animationDelay: `${index * 150}ms` }}
                     >

@@ -23,14 +23,21 @@ export function VenueCard({
     >
       <div className="relative aspect-[4/3] overflow-hidden">
         {venue.image ? (
-          <img
-            src={venue.image}
-            alt={`${venue.name} interior`}
-            loading="lazy"
-            width={1280}
-            height={800}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <>
+            <img
+              src={venue.image}
+              alt={`${venue.name} interior`}
+              loading="lazy"
+              width={1280}
+              height={800}
+              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            />
+            {venue.imageAttribution && (
+              <span className="absolute bottom-1 right-1.5 rounded bg-background/70 px-1.5 py-0.5 text-[9px] text-muted-foreground backdrop-blur-sm">
+                Photo: {venue.imageAttribution}
+              </span>
+            )}
+          </>
         ) : (
           <VenuePlaceholder category={venue.category} />
         )}

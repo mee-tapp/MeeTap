@@ -89,14 +89,21 @@ function VenueDetail() {
       <section className="site-shell grid gap-10 pb-16 lg:grid-cols-[1.1fr_.9fr] lg:items-center">
         <div className="relative aspect-[16/10] overflow-hidden rounded-xl border border-border shadow-[var(--shadow-card)]">
           {venue.image ? (
-            <img
-              src={venue.image}
-              alt={`${venue.name} interior`}
-              loading="eager"
-              width={1280}
-              height={800}
-              className="h-full w-full object-cover"
-            />
+            <>
+              <img
+                src={venue.image}
+                alt={`${venue.name} interior`}
+                loading="eager"
+                width={1280}
+                height={800}
+                className="h-full w-full object-cover"
+              />
+              {venue.imageAttribution && (
+                <span className="absolute bottom-2 right-2 rounded bg-background/70 px-1.5 py-0.5 text-[10px] text-muted-foreground backdrop-blur-sm">
+                  Photo: {venue.imageAttribution}
+                </span>
+              )}
+            </>
           ) : (
             <VenuePlaceholder category={venue.category} iconClassName="size-14" />
           )}

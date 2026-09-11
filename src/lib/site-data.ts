@@ -20,6 +20,8 @@ export type Venue = {
   name: string;
   /** null = no photo yet (real venues come without photos for now) */
   image: string | null;
+  /** Required credit line when `image` is a licensed Google Places photo. */
+  imageAttribution?: string | null;
   /** null = no ratings yet */
   rating: string | null;
   reviews: string;

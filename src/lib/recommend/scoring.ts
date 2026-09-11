@@ -1,4 +1,5 @@
 import type { AmbianceTag, Category, Intent, Purpose } from "./intent.ts";
+import type { VenueIntelligence } from "./venue-intelligence.ts";
 
 /**
  * Deterministic multi-factor scorer.
@@ -33,6 +34,10 @@ export type Candidate = {
   confidence?: number | null;
   /** null = unknown (no opening hours data) */
   open_now: boolean | null;
+  /** Real, validated review-derived evidence (see venue-intelligence.ts) –
+   * absent for the vast majority of venues today. Missing is NEUTRAL, never
+   * a penalty (see scoreVenueIntelligence). */
+  intelligence?: VenueIntelligence | null;
 };
 
 export type Weather = {
@@ -62,6 +67,11 @@ export const DEFAULT_WEIGHTS = {
   weather: 0.8,
   quality: 0.8,
   needs: 0.6,
+  // Only ever non-null when (a) the feature flag is on, (b) the user actually
+  // asked for something subjective, and (c) the venue has real review
+  // evidence for it – see scoreVenueIntelligence. Otherwise this weight never
+  // enters the weighted average, so existing behavior is unchanged.
+  review_intelligence: 1.4,
 } as const;
 export type Weights = { [K in keyof typeof DEFAULT_WEIGHTS]: number };
 
@@ -73,6 +83,17 @@ export const PURPOSE_TAGS: Record<Purpose, AmbianceTag[]> = {
   alone: ["cozy", "quiet"],
   family: ["family_friendly", "group_friendly"],
   business: ["quiet", "work_friendly"],
+};
+
+/** Same idea, but against Venue Intelligence's good_for tags instead of the
+ * venue's own ambiance_tags – real review evidence of what a place is for. */
+const PURPOSE_TO_GOOD_FOR: Record<Purpose, string[]> = {
+  date: ["date", "romantic", "special_occasion"],
+  friends: ["friends", "group", "conversation"],
+  study: ["work_study"],
+  alone: ["solo"],
+  family: ["family"],
+  business: ["business"],
 };
 
 /** Cuisine aliases: intent key → values that may appear in OSM/Overture data. */
@@ -151,8 +172,11 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
       reason: t(locale, `${labelCuisine(want, "tr")} var`, `serves ${labelCuisine(want, "en")}`),
     };
   }
-  // Known cuisine, and it's something else → hard mismatch.
-  return { score: 0, exclude: true };
+  // Known cuisine, and it's something else. Only a hard exclude when the parse
+  // itself is confident – an uncertain read of the sentence should downrank,
+  // not silently drop, a candidate that might still be right.
+  if (intent.confidence >= 0.5) return { score: 0, exclude: true };
+  return { score: 0.15, reason: t(locale, "mutfak belirsiz", "cuisine uncertain") };
 }
 
 function labelCuisine(key: string, locale: "tr" | "en"): string {
@@ -420,6 +444,146 @@ function scoreNeeds(intent: Intent, c: Candidate, locale: "tr" | "en"): Componen
   return { score, ...(score === 1 ? { reason: t(locale, "wifi var", "has wifi") } : {}) };
 }
 
+// User-facing natural-language labels. Internal enum/tag names (food_quality,
+// local_food, crowded, …) and raw confidence numbers must NEVER reach the UI –
+// everything rendered to a user goes through one of these three maps.
+const ASPECT_LABEL: Record<string, [string, string]> = {
+  food_quality: ["yemek kalitesi", "food quality"],
+  service: ["servis", "service"],
+  atmosphere: ["atmosfer", "atmosphere"],
+  quiet: ["sakinlik", "quietness"],
+  romantic: ["romantiklik", "romantic feel"],
+  value: ["fiyat/performans", "value for money"],
+  cleanliness: ["temizlik", "cleanliness"],
+  crowding: ["kalabalık", "crowding"],
+  view: ["manzara", "view"],
+  authenticity: ["otantiklik", "authenticity"],
+  speed_of_service: ["servis hızı", "service speed"],
+};
+/** What the venue seems well-suited FOR, as a natural noun phrase ("X için uygun"). */
+const GOOD_FOR_LABEL: Record<string, [string, string]> = {
+  date: ["çiftler", "couples"],
+  romantic: ["romantik buluşmalar", "romantic dates"],
+  friends: ["arkadaş grupları", "groups of friends"],
+  group: ["kalabalık gruplar", "larger groups"],
+  conversation: ["sohbet ortamı arayanlar", "conversation"],
+  family: ["aileler", "families"],
+  business: ["iş yemekleri", "business meals"],
+  work_study: ["çalışmak isteyenler", "working"],
+  solo: ["tek başına gidenler", "solo visits"],
+  special_occasion: ["özel günler", "special occasions"],
+  local_food: ["yerel yemek deneyimi", "a local food experience"],
+};
+const CAUTION_LABEL: Record<string, [string, string]> = {
+  loud: ["gürültülü olabiliyor", "can be loud"],
+  crowded: ["kalabalık olabiliyor", "can be crowded"],
+  slow_service: ["servis yavaş kalabiliyor", "service can be slow"],
+  expensive_for_value: ["fiyatına göre beklentiyi karşılamayabiliyor", "may not feel worth the price"],
+  touristy: ["oldukça turistik", "quite touristy"],
+  inconsistent_food: ["yemek kalitesi değişkenlik gösterebiliyor", "food quality can be inconsistent"],
+  inconsistent_service: ["servis değişkenlik gösterebiliyor", "service can be inconsistent"],
+};
+// Exported so the named-venue path (engine.ts) can use the exact same
+// natural-language labels instead of a second copy of this vocabulary.
+export function labelAspect(key: string, locale: "tr" | "en"): string {
+  return ASPECT_LABEL[key]?.[locale === "tr" ? 0 : 1] ?? key;
+}
+export function labelGoodFor(key: string, locale: "tr" | "en"): string {
+  return GOOD_FOR_LABEL[key]?.[locale === "tr" ? 0 : 1] ?? key;
+}
+export function labelCaution(key: string, locale: "tr" | "en"): string {
+  return CAUTION_LABEL[key]?.[locale === "tr" ? 0 : 1] ?? key;
+}
+
+/**
+ * Optional Venue Intelligence component (real review evidence only – never
+ * fabricated from name/category). Gated three ways so it can never dominate
+ * an objective query or penalize a venue Tripadvisor simply hasn't reached:
+ *   1. VENUE_INTELLIGENCE_ENABLED must be on.
+ *   2. The user must have actually asked for something subjective
+ *      (review_priorities / review_avoid / a purpose with a good_for match) –
+ *      "500m kahve" never touches this component at all.
+ *   3. The venue must have real intelligence data with real confidence –
+ *      missing data or zero matching evidence returns null (neutral), it
+ *      never scores 0.
+ */
+function scoreVenueIntelligence(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+  if (process.env["VENUE_INTELLIGENCE_ENABLED"] !== "true") return { score: null };
+  const vi = c.intelligence;
+  const purposeGoodFor = intent.purpose ? (PURPOSE_TO_GOOD_FOR[intent.purpose] ?? []) : [];
+  const asked = intent.review_priorities.length > 0 || intent.review_avoid.length > 0 || purposeGoodFor.length > 0;
+  if (!vi || !asked) return { score: null };
+
+  // Additive, confidence-scaled deviation from neutral (0.5) – NOT a plain
+  // average. Averaging would let a single low-confidence signal move the
+  // score exactly as far as a high-confidence one (dividing by its own
+  // confidence cancels it out); this must not happen, so each contribution's
+  // pull is `(score - neutral) * confidence` and they accumulate.
+  let delta = 0;
+  let evidenceCount = 0;
+  let confidenceSum = 0;
+  const aspectHits: string[] = [];
+  const goodForHits: string[] = [];
+  const concerns: string[] = [];
+
+  for (const key of intent.review_priorities) {
+    const s = vi.aspects[key];
+    if (!s) continue;
+    delta += (s.score - 0.5) * s.confidence;
+    evidenceCount += 1;
+    confidenceSum += s.confidence;
+    if (s.score >= 0.6 && s.confidence >= 0.3) aspectHits.push(labelAspect(key, locale));
+  }
+  for (const tag of purposeGoodFor) {
+    const g = vi.good_for.find((x) => x.tag === tag);
+    if (!g) continue;
+    delta += (g.score - 0.5) * g.confidence;
+    evidenceCount += 1;
+    confidenceSum += g.confidence;
+    if (g.score >= 0.6 && g.confidence >= 0.3) goodForHits.push(labelGoodFor(tag, locale));
+  }
+  for (const tag of intent.review_avoid) {
+    const caution = vi.cautions.find((x) => x.tag === tag);
+    if (!caution) continue;
+    delta -= caution.score * caution.confidence;
+    evidenceCount += 1;
+    confidenceSum += caution.confidence;
+    if (caution.score >= 0.5 && caution.confidence >= 0.3) concerns.push(labelCaution(tag, locale));
+  }
+
+  if (evidenceCount === 0) return { score: null }; // asked, but zero real evidence either way – stay neutral
+  const score = Math.max(0, Math.min(1, 0.5 + delta));
+
+  // Natural-language only past this point – no enum names, no confidence
+  // decimals ever reach the reason string. A qualitative "limited reviews"
+  // note replaces the raw number when the evidence backing this is thin.
+  const avgConfidence = confidenceSum / evidenceCount;
+  const limited = avgConfidence < 0.4;
+  const sentences: string[] = [];
+  if (aspectHits.length) {
+    sentences.push(
+      t(
+        locale,
+        `kullanıcı yorumlarında özellikle ${aspectHits.join(" ve ")} olumlu öne çıkıyor`,
+        `user reviews particularly highlight ${aspectHits.join(" and ")}`,
+      ),
+    );
+  }
+  if (goodForHits.length) {
+    sentences.push(
+      t(locale, `${goodForHits.join(" ve ")} için uygun görünüyor`, `seems well suited for ${goodForHits.join(" and ")}`),
+    );
+  }
+  if (concerns.length) {
+    sentences.push(t(locale, `${concerns.join(", ")}`, `reviews note it ${concerns.join(", ")}`));
+  }
+  if (limited && sentences.length) {
+    sentences.push(t(locale, "yorum verisi henüz sınırlı", "based on limited review data so far"));
+  }
+  const reason = sentences.length ? sentences.join(t(locale, "; ", "; ")) : undefined;
+  return { score, ...(reason ? { reason } : {}) };
+}
+
 // --- ranking ------------------------------------------------------------------
 
 export type ScoredVenue = {
@@ -436,12 +600,26 @@ export function scoreCandidate(
   c: Candidate,
   ctx: ScoringContext,
   weights: Weights = DEFAULT_WEIGHTS,
+  /** Dev/debug only – called with the reason just before a hard exclude returns null. */
+  onExclude?: (reason: "category" | "cuisine" | "open_now") => void,
 ): ScoredVenue | null {
   const locale = ctx.locale ?? "en";
 
-  // Hard filters
-  if (intent.categories.length && !intent.categories.includes(c.category)) return null;
-  if (c.open_now === false) return null;
+  // Hard filters. Category only gates here when it was explicitly stated
+  // ("restoran", "kafe" …) – a category merely inferred from a cuisine word
+  // must not silently prune the whole candidate pool (Stage A recall).
+  if (
+    intent.categories.length &&
+    intent.category_explicit &&
+    !intent.categories.includes(c.category)
+  ) {
+    onExclude?.("category");
+    return null;
+  }
+  if (c.open_now === false) {
+    onExclude?.("open_now");
+    return null;
+  }
 
   const dist = scoreDistance(intent, c, ctx, locale);
   const results: Record<ComponentKey, ComponentResult> = {
@@ -453,8 +631,12 @@ export function scoreCandidate(
     weather: scoreWeather(intent, c, ctx, locale),
     quality: scoreQuality(c, locale),
     needs: scoreNeeds(intent, c, locale),
+    review_intelligence: scoreVenueIntelligence(intent, c, locale),
   };
-  if (Object.values(results).some((r) => r.exclude)) return null;
+  if (Object.values(results).some((r) => r.exclude)) {
+    onExclude?.("cuisine"); // cuisine is the only component that sets exclude today
+    return null;
+  }
 
   let weighted = 0;
   let weightSum = 0;
@@ -491,9 +673,10 @@ export function rankCandidates(
   candidates: Candidate[],
   ctx: ScoringContext,
   weights: Weights = DEFAULT_WEIGHTS,
+  onExclude?: (reason: "category" | "cuisine" | "open_now") => void,
 ): ScoredVenue[] {
   return candidates
-    .map((c) => scoreCandidate(intent, c, ctx, weights))
+    .map((c) => scoreCandidate(intent, c, ctx, weights, onExclude))
     .filter((s): s is ScoredVenue => s !== null)
     .sort((a, b) => b.score - a.score);
 }

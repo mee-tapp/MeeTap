@@ -113,6 +113,16 @@ try {
 
   await sql.begin(async (tx) => {
     // 1. Which staging rows already exist? Match on any open-data source id.
+    //    A staging row's sources (overture id + matched osm id) can each
+    //    independently already belong to a DIFFERENT pre-existing venue_id
+    //    from an earlier run (e.g. an osm node that used to be matched to one
+    //    venue, while its overture id was separately linked to another).
+    //    Blindly picking one (old: min(venue_id)) would silently overwrite
+    //    that venue's name/category/coordinates with an unrelated batch's
+    //    data – this is the exact "one brand record fans out across many
+    //    venues" risk. Excluding ambiguous matches (having count = 1) means
+    //    such a row is left alone (falls through to the insert step, which
+    //    no-ops on the existing slug) instead of corrupting an existing venue.
     await tx`
       create temp table staging_match as
       select s.slug as staging_slug, min(vs.venue_id::text)::uuid as venue_id
@@ -120,7 +130,8 @@ try {
         join lateral jsonb_array_elements(s.sources) src on true
         join public.venue_sources vs
           on vs.source = src->>'source' and vs.source_id = src->>'source_id'
-       group by s.slug`;
+       group by s.slug
+      having count(distinct vs.venue_id) = 1`;
 
     // 2. Insert brand-new venues.
     const inserted = await tx`

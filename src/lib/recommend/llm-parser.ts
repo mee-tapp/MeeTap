@@ -8,6 +8,7 @@ import {
   type ParsedIntent,
 } from "./intent.ts";
 import { parseIntentWithRules } from "./rule-parser.ts";
+import { ASPECT_KEYS, CAUTION_TAGS } from "./venue-intelligence.ts";
 
 /**
  * LLM intent parser (DeepSeek / any OpenAI-compatible chat endpoint).
@@ -22,9 +23,11 @@ import { parseIntentWithRules } from "./rule-parser.ts";
 
 export type LlmProvider = "deepseek" | "gemini" | "groq" | "none";
 
-type ProviderConfig = { url: string; model: string; key: string };
+export type ProviderConfig = { url: string; model: string; key: string };
 
-function providerConfig(): ProviderConfig | null {
+/** The one place MeeTap resolves an LLM provider from env – reused by
+ * scripts (e.g. profile-llm.mjs) so there is never a second LLM config path. */
+export function providerConfig(): ProviderConfig | null {
   const provider = (process.env["LLM_PROVIDER"] ?? "none") as LlmProvider;
   if (provider === "deepseek" && process.env["DEEPSEEK_API_KEY"]) {
     return {
@@ -69,7 +72,9 @@ Return ONLY a JSON object with exactly these keys:
   "time": "now" | "tonight" | "tomorrow" | "weekend" | null,
   "needs": array from ${JSON.stringify(NEEDS)},
   "weather_sensitive": boolean (true if the sentence mentions weather),
-  "unmapped": array of short strings – wishes you could not map to any field
+  "unmapped": array of short strings – wishes you could not map to any field,
+  "review_priorities": array from ${JSON.stringify(ASPECT_KEYS)} – subjective things the user cares about that only REAL reviews can confirm (e.g. "yemekleri iyi" → "food_quality", "servisi iyi" → "service"). This never filters venues, only ranks them – include it whenever relevant, even loosely.
+  "review_avoid": array from ${JSON.stringify(CAUTION_TAGS)} – things the user does not want reviews to say (e.g. "kalabalık olmasın" → "crowded")
 }
 Ambiance list: ${JSON.stringify(AMBIANCE_TAGS)}.
 

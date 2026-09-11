@@ -8,6 +8,7 @@ import {
   type ParsedIntent,
   type Purpose,
 } from "./intent.ts";
+import type { AspectKey, CautionTag } from "./venue-intelligence.ts";
 
 /**
  * Rule-based Turkish/English intent parser.
@@ -228,6 +229,34 @@ const NEED_DICT: Dict<Need> = [
   [["sigarasiz", "sigara icilmeyen", "no smoking", "dumansiz"], "no_smoking"],
 ];
 
+// Subjective / review-evidence signals – these only ever feed
+// intent.review_priorities / review_avoid (ranking), never a hard filter.
+const REVIEW_PRIORITY_DICT: Dict<AspectKey> = [
+  [
+    [
+      "yemekleri iyi", "yemek kalitesi", "yemekleri gercekten iyi", "yemekleri cok iyi",
+      "yemekleri harika", "lezzetli", "nefis", "guzel yemek", "yemekleri guzel",
+      "good food", "food is great", "great food", "delicious",
+    ],
+    "food_quality",
+  ],
+  [
+    ["servisi iyi", "servis kalitesi", "ilgili personel", "guler yuzlu", "good service", "great service"],
+    "service",
+  ],
+  [
+    ["paranin karsiligi", "fiyat performans", "degerinde", "uygun fiyat performans", "value for money", "worth the price"],
+    "value",
+  ],
+  [["atmosferi guzel", "ortami guzel", "ambiyans", "atmosfer", "nice atmosphere", "great atmosphere"], "atmosphere"],
+  [["konusabilecegimiz", "sohbet edebilecegimiz", "rahat konusa", "sohbet", "can talk", "conversation"], "quiet"],
+];
+
+const REVIEW_AVOID_DICT: Dict<CautionTag> = [
+  [["yavas servis", "servis yavas", "slow service"], "slow_service"],
+  [["turistik cok", "cok turistik", "too touristy"], "touristy"],
+];
+
 const CATEGORY_DICT: Dict<Category> = [
   [["kafe", "cafe", "kahveci", "coffee shop", "kahve icmek", "cay icmek"], "Cafés"],
   [
@@ -399,18 +428,24 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
   intent.cuisines = findAll(text, CUISINE_DICT);
   intent.needs = findAll(text, NEED_DICT);
   intent.categories = findAll(text, CATEGORY_DICT);
-  // A cuisine request implies a restaurant unless the user said café/bar.
+  // A cuisine request implies a restaurant unless the user said café/bar. This is
+  // a guess, not a stated category, so mark it non-explicit: retrieval should
+  // stay broad and the scorer should not hard-exclude on it (Stage A recall).
   if (intent.cuisines.length && intent.categories.length === 0) {
     const cafeish = intent.cuisines.every((c) =>
       ["coffee", "tea", "dessert", "bakery", "breakfast"].includes(c),
     );
     intent.categories = [cafeish ? "Cafés" : "Restaurants"];
+    intent.category_explicit = false;
   }
 
   // Ambiance with OR-groups and negation, clause by clause.
   const allOf = new Set<AmbianceTag>();
   const anyOf: AmbianceTag[][] = [];
   const avoid = new Set<AmbianceTag>();
+  // Subjective ranking-only signals (never a filter) – see intent.ts.
+  const reviewPriorities = new Set<AspectKey>();
+  const reviewAvoid = new Set<CautionTag>();
 
   for (const clause of clauses(text)) {
     // "kalabalık olmasın" → avoid lively ; "gürültülü olmasın" → quiet
@@ -421,8 +456,12 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
     ) {
       avoid.add("lively");
       allOf.add("quiet");
+      reviewAvoid.add("crowded");
+      reviewAvoid.add("loud");
       continue;
     }
+    for (const tag of findAll(clause, REVIEW_PRIORITY_DICT)) reviewPriorities.add(tag);
+    for (const tag of findAll(clause, REVIEW_AVOID_DICT)) reviewAvoid.add(tag);
     const tags = findAll(clause, AMBIANCE_DICT);
     if (tags.length === 0) continue;
     const negated = NEGATION_RE.test(clause) && !/olsun\b/.test(clause.replace(/olmasin/g, ""));
@@ -441,7 +480,18 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
   for (const group of anyOf) for (const t of group) allOf.delete(t);
   intent.ambiance = { all_of: [...allOf], any_of: anyOf, avoid: [...avoid] };
 
+  // Ambiance tags that are ALSO valid Venue Intelligence aspect keys double as
+  // review priorities – "romantik"/"sakin"/"manzaralı" should both match the
+  // venue's own tags AND reward real review evidence saying the same thing.
+  const ASPECT_TAG_OVERLAP = new Set(["romantic", "quiet", "view"]);
+  for (const t of allOf) if (ASPECT_TAG_OVERLAP.has(t)) reviewPriorities.add(t as AspectKey);
+
   intent.budget = parseBudget(text);
+  // "çok pahalı olmasın" already sets budget.level="low"; also treat it as a
+  // caution to weigh actual "not worth the price" review evidence.
+  if (intent.budget.level === "low") reviewAvoid.add("expensive_for_value");
+  intent.review_priorities = [...reviewPriorities];
+  intent.review_avoid = [...reviewAvoid];
   Object.assign(intent, parseDistance(text));
   intent.group_size = parseGroupSize(text);
   intent.time = parseTime(text);

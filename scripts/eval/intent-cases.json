@@ -132,5 +132,9 @@
   {
     "q": "Kalabalık olmayan, sıcak bir yerde tatlı ve kahve",
     "expect": { "avoid": ["lively"], "cuisines_any": ["dessert", "coffee"] }
+  },
+  {
+    "q": "I want coffee shop",
+    "expect": { "categories": ["Cafés"], "cuisines_any": ["coffee"] }
   }
 ]

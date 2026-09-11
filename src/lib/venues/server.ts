@@ -118,7 +118,7 @@ const SINGULAR: Record<string, string> = {
 };
 
 const VENUE_COLUMNS =
-  "id,slug,name,category,cuisines,lat,lon,district,city,price_band,currency,ambiance_tags,rating_avg,rating_count,confidence,website,opening_hours,outdoor_seating,seaside";
+  "id,slug,name,category,cuisines,lat,lon,district,city,price_band,currency,ambiance_tags,rating_avg,rating_count,confidence,website,opening_hours,outdoor_seating,seaside,photo_url,photo_attribution";
 
 export type VenueRowLite = {
   id: string;
@@ -140,6 +140,10 @@ export type VenueRowLite = {
   opening_hours: string | null;
   outdoor_seating: boolean | null;
   seaside?: boolean | null;
+  /** Licensed Google Places photo, when one has been matched (see
+   * scripts/enrich/google-photos-pilot.mjs) – null for almost every venue today. */
+  photo_url?: string | null;
+  photo_attribution?: string | null;
 };
 
 function haversineMin(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -179,7 +183,8 @@ export function toVenue(
     id: row.id,
     slug: row.slug,
     name: row.name,
-    image: null,
+    image: row.photo_url ?? null,
+    imageAttribution: row.photo_attribution ?? null,
     rating: count > 0 && row.rating_avg != null ? Number(row.rating_avg).toFixed(1) : null,
     reviews: String(count),
     time: `${minutes} min`,
@@ -237,20 +242,26 @@ export const fetchVenues = createServerFn({ method: "GET" })
       });
       if (band < 4) q = q.lte("price_band", Math.max(1, band));
     }
-    // Pull a wider slice than needed so the distance filter still has choice.
+    // Pull a wider slice than needed – both so the distance filter still has
+    // choice, and so a run of high-"confidence" chain branches (open-data
+    // confidence reflects how sure we are the record is accurate, not how
+    // interesting the place is) can't fill the entire visible list by itself;
+    // same de-prioritization fetchFeatured already applies below.
     const {
       data: rows,
       count,
       error,
     } = await q
       .order("confidence", { ascending: false, nullsFirst: false })
-      .limit(data.maxDistanceMin != null ? 400 : data.limit);
+      .limit(data.maxDistanceMin != null ? 400 : Math.max(data.limit * 5, 200));
     if (error) throw new Error(error.message);
 
     let venues = (rows as VenueRowLite[]).map((r) => toVenue(r, center));
     if (data.maxDistanceMin != null) {
       venues = venues.filter((v) => Number.parseInt(v.time, 10) <= data.maxDistanceMin!);
     }
+    const isChain = (name: string) => CHAIN_RE.test(name);
+    venues.sort((a, b) => Number(isChain(a.name)) - Number(isChain(b.name)));
     return { venues: venues.slice(0, data.limit), total: count ?? 0 };
   });
 
@@ -278,7 +289,7 @@ export const fetchFeatured = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const isChain = (name: string) => CHAIN_RE.test(name);
     const pool = ((rows ?? []) as Array<VenueRowLite & { distance_m: number }>)
-      .filter((r) => r.website && (r.cuisines?.length ?? 0) > 0)
+      .filter((r) => r.website && (r.cuisines?.length ?? 0) > 0 && r.photo_url)
       .sort(
         (a, b) =>
           Number(isChain(a.name)) - Number(isChain(b.name)) ||
@@ -421,7 +432,9 @@ export const recommendVenues = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { recommend } = await import("@/lib/recommend/engine");
-    const out = await recommend({ ...data, locale: "en" });
+    // No explicit locale from the client – recommend() detects it from the
+    // query text itself, so explanations match what the user actually typed.
+    const out = await recommend({ ...data });
     const origin = out.origin;
     const results = out.results.map((r) =>
       toVenue({ ...r.venue, city: data.city }, origin, {
