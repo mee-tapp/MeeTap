@@ -15,6 +15,7 @@ import {
   labelTag,
   rankCandidates,
   type Candidate,
+  type ExcludeReason,
   type ScoredVenue,
   type Weights,
 } from "./scoring.ts";
@@ -57,7 +58,7 @@ export type RecommendInput = {
 export type RecommendDebug = {
   candidates_before: number;
   candidates_after_hard_filters: number;
-  hard_filter_exclusions: { category: number; cuisine: number; open_now: number };
+  hard_filter_exclusions: { category: number; cuisine: number; open_now: number; purpose: number };
   fallback_used: string | null;
   mode: "discovery" | "named_venue";
 };
@@ -639,8 +640,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   const fetchNearby = async (radius: number, at: { lat: number; lon: number } = origin) => {
     const sets = await Promise.all([
       rpc(radius, {}, at),
-      wantedTags.length ? rpc(radius, { tags: wantedTags }, at) : Promise.resolve([]),
-      cuisineAliases.length ? rpc(radius, { cuisines: cuisineAliases }, at) : Promise.resolve([]),
+      // What was asked for is found city-wide; distance only orders it later.
+      wantedTags.length
+        ? rpc(Math.max(radius, 25000), { tags: wantedTags }, at)
+        : Promise.resolve([]),
+      cuisineAliases.length
+        ? rpc(Math.max(radius, 25000), { cuisines: cuisineAliases }, at)
+        : Promise.resolve([]),
       // Venues the open data typed as a generic restaurant but whose NAME says
       // what they serve ("Özbek Sofrası") – found by keyword, city-wide radius.
       nameKeywords.length
@@ -669,9 +675,9 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   //    through the coverage split, so a wish the pool has no data for is
   //    reported instead of scored.
   const candidatesBeforeFilters = rows.length;
-  const exclusions = { category: 0, cuisine: 0, open_now: 0 };
+  const exclusions = { category: 0, cuisine: 0, open_now: 0, purpose: 0 };
   const tally = input.debug
-    ? (reason: "category" | "cuisine" | "open_now") => {
+    ? (reason: ExcludeReason) => {
         exclusions[reason] += 1;
       }
     : undefined;

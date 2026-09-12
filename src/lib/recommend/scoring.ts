@@ -88,8 +88,10 @@ export const DEFAULT_WEIGHTS = {
   cuisine: 2.5,
   ambiance: 1.5,
   budget: 1.3,
-  distance: 1.1,
-  purpose: 1.0,
+  // Distance is shown, not decisive: the user (or, later, their group) picks
+  // how far they are willing to go. It only breaks ties between equals.
+  distance: 0.4,
+  purpose: 1.6,
   weather: 0.8,
   quality: 0.8,
   needs: 0.6,
@@ -103,12 +105,116 @@ export type Weights = { [K in keyof typeof DEFAULT_WEIGHTS]: number };
 
 /** What each purpose "wants" from a venue when the user didn't spell it out. */
 export const PURPOSE_TAGS: Record<Purpose, AmbianceTag[]> = {
-  date: ["romantic", "quiet", "cozy", "view", "seaside"],
+  date: ["romantic", "fine_dining", "quiet", "cozy", "view", "seaside"],
   friends: ["lively", "group_friendly"],
   study: ["work_friendly", "quiet"],
   alone: ["cozy", "quiet"],
   family: ["family_friendly", "group_friendly"],
-  business: ["quiet", "work_friendly"],
+  business: ["quiet", "fine_dining", "work_friendly"],
+};
+
+/**
+ * What KIND of place a venue is, from its open-data type, category and name.
+ * A purpose then says which kinds are simply wrong for it: nobody takes their
+ * partner to a hookah bar or a wedding hall for an anniversary dinner, and a
+ * business lunch is not held at a food court. Signals, not guesses: only
+ * explicit types and whole words in the name count.
+ */
+type VenueKind = "bar" | "fast_food" | "event_hall";
+const KIND_RAW_TYPES: Record<VenueKind, string[]> = {
+  bar: [
+    "bar",
+    "pub",
+    "gastropub",
+    "cocktail_bar",
+    "wine_bar",
+    "beer_bar",
+    "beer_garden",
+    "sports_bar",
+    "lounge",
+    "hookah_bar",
+    "dance_club",
+    "nightclub",
+    "night_club",
+    "karaoke",
+  ],
+  fast_food: [
+    "fast_food",
+    "fast_food_restaurant",
+    "food_court",
+    "cafeteria",
+    "canteen",
+    "food_stand",
+    "food_truck",
+    "sandwich_shop",
+    "doner_kebab",
+    "pizza_delivery",
+  ],
+  event_hall: ["banquet_hall", "wedding_venue", "event_venue", "party_event_planning"],
+};
+const KIND_NAME_WORDS: Record<VenueKind, string[]> = {
+  bar: [
+    "bar",
+    "pub",
+    "lounge",
+    "club",
+    "nargile",
+    "qelyan",
+    "qəlyan",
+    "hookah",
+    "shisha",
+    "karaoke",
+    "disco",
+    "pivo",
+    "beer",
+    "bira",
+  ],
+  fast_food: [
+    "fast food",
+    "fastfood",
+    "büfe",
+    "bufe",
+    "kantin",
+    "canteen",
+    "cafeteria",
+    "food court",
+    "lokal",
+    "tost",
+    "dönerci",
+    "donerci",
+  ],
+  event_hall: ["şadlıq", "sadliq", "shadlig", "wedding", "banquet", "toy evi", "düğün", "dugun"],
+};
+/** Whole word (or phrase) in the name – "Bar & Restaurant" yes, "Barbekü" no. */
+function phraseInName(name: string, phrase: string): boolean {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}])${escaped}([^\\p{L}]|$)`, "iu").test(name);
+}
+export function venueKinds(c: Pick<Candidate, "name" | "category" | "raw_type">): Set<VenueKind> {
+  const kinds = new Set<VenueKind>();
+  const raw = (c.raw_type ?? "").toLowerCase();
+  if (c.category === "Bars") kinds.add("bar");
+  for (const kind of Object.keys(KIND_RAW_TYPES) as VenueKind[]) {
+    if (KIND_RAW_TYPES[kind].includes(raw)) kinds.add(kind);
+    if (KIND_NAME_WORDS[kind].some((w) => phraseInName(c.name, w))) kinds.add(kind);
+  }
+  return kinds;
+}
+/** Per purpose: kinds that disqualify a venue outright, and kinds that only
+ * count against it. A kind the user explicitly asked for (category "Bars")
+ * is never disqualifying. */
+const PURPOSE_KIND_RULES: Record<Purpose, { exclude: VenueKind[]; penalize: VenueKind[] }> = {
+  date: { exclude: ["bar", "fast_food", "event_hall"], penalize: [] },
+  business: { exclude: ["bar", "fast_food", "event_hall"], penalize: [] },
+  family: { exclude: ["bar", "event_hall"], penalize: ["fast_food"] },
+  study: { exclude: ["bar", "event_hall"], penalize: ["fast_food"] },
+  alone: { exclude: ["event_hall"], penalize: ["bar"] },
+  friends: { exclude: ["event_hall"], penalize: [] },
+};
+const KIND_LABEL: Record<VenueKind, [string, string]> = {
+  bar: ["bar/pub", "a bar"],
+  fast_food: ["fast food/büfe", "fast food"],
+  event_hall: ["düğün/şadlıq salonu", "an event hall"],
 };
 
 /** Same idea, but against Venue Intelligence's good_for tags instead of the
@@ -159,6 +265,7 @@ const CUISINE_ALIASES: Record<string, string[]> = {
 // --- component scores ---------------------------------------------------------
 
 export type ComponentKey = keyof Weights;
+export type ExcludeReason = "category" | "cuisine" | "open_now" | "purpose";
 export type ComponentResult = {
   /** 0..1, or null when the factor doesn't apply (weight dropped) */
   score: number | null;
@@ -487,15 +594,6 @@ function scoreDistance(
 
 function scorePurpose(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
   if (!intent.purpose) return { score: null };
-  const want = PURPOSE_TAGS[intent.purpose];
-  if (c.ambiance_tags.length === 0) return { score: 0.4 };
-  const have = new Set(c.ambiance_tags);
-  const hits = want.filter((tag) => have.has(tag));
-  // Tags guessed from the name/category are weaker evidence than tags people
-  // confirmed: cap the score and say "looks good for" rather than "good for".
-  const inferred = c.ambiance_source == null || c.ambiance_source === "inferred";
-  const raw = hits.length === 0 ? 0.15 : Math.min(1, 0.5 + hits.length * 0.25);
-  const score = inferred ? Math.min(raw, 0.8) : raw;
   const purposeLabel: Record<Purpose, [string, string]> = {
     date: ["randevu için", "for a date"],
     friends: ["arkadaş buluşması için", "for meeting friends"],
@@ -505,6 +603,38 @@ function scorePurpose(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
     business: ["iş görüşmesi için", "for business"],
   };
   const pl = locale === "tr" ? purposeLabel[intent.purpose][0] : purposeLabel[intent.purpose][1];
+
+  // 1. The kind of place must fit the occasion at all.
+  const kinds = venueKinds(c);
+  const rules = PURPOSE_KIND_RULES[intent.purpose];
+  const askedForBars = intent.category_explicit && intent.categories.includes("Bars");
+  const wrong = rules.exclude.find((k) => kinds.has(k) && !(k === "bar" && askedForBars));
+  if (wrong) {
+    return {
+      score: 0,
+      exclude: true,
+      reason: t(
+        locale,
+        `${KIND_LABEL[wrong][0]}, ${pl} uygun değil`,
+        `${KIND_LABEL[wrong][1]}, not ${pl}`,
+      ),
+    };
+  }
+  const weak = rules.penalize.find((k) => kinds.has(k));
+  if (weak) {
+    return { score: 0.2, reason: t(locale, KIND_LABEL[weak][0], KIND_LABEL[weak][1]) };
+  }
+
+  // 2. Then how well its atmosphere fits.
+  const want = PURPOSE_TAGS[intent.purpose];
+  if (c.ambiance_tags.length === 0) return { score: 0.4 };
+  const have = new Set(c.ambiance_tags);
+  const hits = want.filter((tag) => have.has(tag));
+  // Tags guessed from the name/category are weaker evidence than tags people
+  // confirmed: cap the score and say "looks good for" rather than "good for".
+  const inferred = c.ambiance_source == null || c.ambiance_source === "inferred";
+  const raw = hits.length === 0 ? 0.15 : Math.min(1, 0.5 + hits.length * 0.25);
+  const score = inferred ? Math.min(raw, 0.8) : raw;
   const reason =
     score >= 0.75
       ? inferred
@@ -763,7 +893,7 @@ export function scoreCandidate(
   ctx: ScoringContext,
   weights: Weights = DEFAULT_WEIGHTS,
   /** Dev/debug only – called with the reason just before a hard exclude returns null. */
-  onExclude?: (reason: "category" | "cuisine" | "open_now") => void,
+  onExclude?: (reason: ExcludeReason) => void,
 ): ScoredVenue | null {
   const locale = ctx.locale ?? "en";
 
@@ -795,8 +925,12 @@ export function scoreCandidate(
     needs: scoreNeeds(intent, c, locale),
     review_intelligence: scoreVenueIntelligence(intent, c, locale),
   };
+  if (results.purpose.exclude) {
+    onExclude?.("purpose");
+    return null;
+  }
   if (Object.values(results).some((r) => r.exclude)) {
-    onExclude?.("cuisine"); // cuisine is the only component that sets exclude today
+    onExclude?.("cuisine");
     return null;
   }
 
@@ -835,7 +969,7 @@ export function rankCandidates(
   candidates: Candidate[],
   ctx: ScoringContext,
   weights: Weights = DEFAULT_WEIGHTS,
-  onExclude?: (reason: "category" | "cuisine" | "open_now") => void,
+  onExclude?: (reason: ExcludeReason) => void,
 ): ScoredVenue[] {
   return candidates
     .map((c) => scoreCandidate(intent, c, ctx, weights, onExclude))
