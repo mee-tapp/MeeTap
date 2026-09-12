@@ -1,11 +1,11 @@
 # Meetap – Etap Etap Görev Planı
 
-Notion'a içe aktarılabilir (Import → Markdown). Her görevin başındaki kutu tamamlanınca işaretlenir.
+Notion'a içe aktarılabilir (Import → Markdown). Her görevin başındaki kutu tamamlanınca işaretlenir. Bu dosya kaynak; Notion bağlayıcısı yetkilendirilince aynı liste oradan güncellenecek.
 Durum: ⬜ yapılmadı · 🟨 devam ediyor · ✅ bitti · ⏸ karar bekliyor
 
 Kurallar:
 
-- Lovable arayüzü, stil ve sayfa düzeni değişmez. Sadece veri kaynağı ve mantık değişir.
+- Onaylı arayüz tasarımı (stil, sayfa düzeni) değişmez. Sadece veri kaynağı ve mantık değişir.
 - Sahte mekan yok. Her kayıt gerçek bir açık veri kaydına bağlıdır.
 - Sıfır bütçe: sadece ücretsiz katman ve açık veri.
 - İçerik kaldırma / "yakında" gibi kararlar Ali'ye sorulur.
@@ -103,6 +103,7 @@ Kurallar:
 - **2026-09-11** — Kadıköy pilot örneği: OSM 1.026 + Overture 3.045 gerçek mekan → birleştirilince 3.423 mekan (637'si iki kaynakta da var). Bakü merkez OSM örneği: 752 mekan. Kural tabanlı çözümleyici + puanlama gerçek Kadıköy verisiyle uçtan uca çalışıyor (`node scripts/recommend-smoke.mjs`).
 - **2026-09-11 (akşam)** — Pilot = iki şehrin tamamı. Bakü tamamı: OSM 2.431 + Overture 5.485 → 7.234 mekan. İstanbul tamamı: Overture 72.670 mekan (OSM indirmesi sürüyor). Overture için akışlı, kategori filtreli Python betiği eklendi (`scripts/data/fetch-overture.py`).
 - **2026-09-11 (gece)** — Supabase şeması kuruldu, Bakü 7.234 mekan yüklendi. DeepSeek niyet çözümleyici canlı (1–2 s). Uçtan uca canlı öneri çalışıyor: cümle → DeepSeek → Open-Meteo → PostGIS adaylar → puanlama → açıklama, ~5 s. Overpass sunucuları İstanbul için yanıt vermediğinden Geofabrik Türkiye dosyası (645 MB) indirildi, yerel süzme betiği eklendi (`scripts/data/fetch-osm-pbf.py`).
+- **2026-09-12 (akşam)** — Nihat: venue intelligence katmanı, Tripadvisor pilotu (Nergiz), Google fotoğraf pilotu, Vercel deploy. Ali'nin testleri üzerine: açık mutfak sözlüğü, dürüst açıklamalar, konum izni düzeltmesi, fiyat seviyesi gösterimi, şube tekilleştirme. Scaffold kalıntıları temizlendi (AGENTS.md, bun dosyaları, editör hata raporlama); build preset paketi deploy riski yüzünden kaldı.
 - **2026-09-12** — "Deniz kenarı" artık coğrafi gerçek: Overture su poligonlarından kıyı çizgisi çıkarıldı, her mekanın kıyıya uzaklığı hesaplandı (İstanbul 6.316, Bakü 211 mekan ≤150 m). Niyet sözlüğüne `seaside` eklendi. Ana sayfa kartı 3 sonuç gösteriyor. Kategori söylenmezse varsayılan kafe/restoran/bar. Kural çözümleyici için 20 cümlelik değerlendirme seti eklendi.
 - **2026-09-11 (geç gece)** — Arayüz gerçek veriye bağlandı (ana sayfa arama + öne çıkanlar, keşfet, detay + yorum). Tasarım dosyalarına dokunulmadı; sadece veri kaynağı değişti, fotoğraf yerine kategori ikonu, "No ratings yet" ve "Be the first to review" durumları eklendi. İstanbul tamamı: OSM 15.030 + Overture 72.670 → 80.431 mekan birleştirildi ve Supabase'e yüklendi (toplam 87.665 gerçek mekan). Dev sunucusunda uçtan uca doğrulandı (Bakü).
 
@@ -121,7 +122,9 @@ Açık karar hâlâ yorum verisi kaynağı (Tripadvisor API + sınırlı scraper
 
 Durduk. Açık karar: yorum verisi için Tripadvisor yolu (bkz. README → Geliştirici Rehberi → bölüm 2). Öneri: resmi API + sınırlı scraper. Anahtar `.env`'e girince `scripts/enrich/tripadvisor.mjs` ile başlanır, sonra DeepSeek profil üretimi, sonra sıralamanın profilleri kullanması, sonra 30 cümlelik sıralama testi.
 
-## Sıradaki işler (öncelik sırasıyla)
+## Sıradaki işler (öncelik sırasıyla — README bölüm 2 ile aynı)
+
+0. Yorum verisi kaynağı kararı → Tripadvisor eşleştirme + profil üretimi → sıralamada "yorumlara göre" → 30 cümlelik sıralama testi
 
 1. Ortam etiketlerinin LLM ile toplu üretimi (şu an sadece kategori ipucu; "manzaralı", "romantik" gibi istekler çoğu mekanda eşleşemiyor)
 2. Kategori temizliği (düğün salonu, vize ofisi, kantin gibi kayıtların restoran listesinden çıkarılması) — ilk adım atıldı: puanı olmayan mekanlarda Overture güven skoru kalite sinyali olarak kullanılıyor

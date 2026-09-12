@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Review, Venue } from "@/lib/site-data";
 
 /**
- * Server functions – the only bridge between the Lovable UI and real data.
+ * Server functions – the only bridge between the UI and real data.
  *
  * Every function returns the `Venue` shape the UI already renders, so no page
  * layout or styling has to change. Heavy server-only modules (Supabase service
@@ -162,7 +162,7 @@ export function estimateBudget(band: number | null, currency: string | null): nu
   return band ? (table[band - 1] ?? table[1]) : table[1];
 }
 
-/** DB row → the exact shape the Lovable components render. */
+/** DB row → the exact shape the UI components render. */
 export function toVenue(
   row: VenueRowLite,
   origin: { lat: number; lon: number },

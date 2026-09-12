@@ -56,50 +56,58 @@ Adaptive Personalization: Continuous scoring adjustments based on user acceptanc
 
 ---
 
-# Geliştirici Rehberi (Türkçe) — Nerede kaldık, nasıl devam edilir
+# Geliştirici Rehberi (Türkçe)
 
-> Bu bölüm 12 Eylül 2026 (akşam) itibarıyla projenin gerçek durumunu anlatır. Güncel "nerede kaldık" için `docs/MEETAP-TASKS.md` başındaki bölüme bakın. Yukarıdaki İngilizce metin ürün vizyonudur; aşağıdaki teknik gerçektir.
+> 12 Eylül 2026 itibarıyla projenin gerçek durumu. Yukarıdaki İngilizce metin ürün vizyonu, aşağıdaki teknik gerçektir. Günlük "nerede kaldık" notları `docs/MEETAP-TASKS.md` dosyasının başında.
 
-## 1. Şu an çalışan şeyler
+## 1. Yapılanlar
 
-- **Gerçek mekan verisi:** İstanbul'un tamamı (80.431) ve Bakü'nün tamamı (7.234) Supabase'de. Kaynaklar: OpenStreetMap + Overture Maps (ikisi de açık veri, ücretsiz). Sahte mekan yok.
-- **Mutfak sözlüğü açık:** "<x> mutfağı" kalıbı ve DeepSeek serbest anahtar üretir; eşleşme veri + mekan adı (demonim) ile. Belirtilen mutfak zorunluluktur.
-- **Doğal dil → niyet:** Kullanıcının cümlesini DeepSeek yapılandırılmış JSON'a çevirir (`src/lib/recommend/llm-parser.ts`); DeepSeek yoksa/çökerse kural tabanlı Türkçe/İngilizce çözümleyici devreye girer (`rule-parser.ts`). 20 cümlelik test setinde kurallar 20/20, DeepSeek 19/20 (`node scripts/eval/intent-eval.mjs`).
-- **Sıralama:** Deterministik, ağırlıklı puanlama (`scoring.ts`): mutfak, ortam etiketleri, bütçe, mesafe, amaç, hava, kalite. LLM mekan seçmez; sadece cümleyi anlar. Açıklamalar puan bileşenlerinden şablonla üretilir ("serves seafood · fits your budget (estimated) · 9 min walk").
-- **Coğrafi gerçekler:** Her mekanın kıyıya uzaklığı hesaplı (`seaside`), hava durumu Open-Meteo'dan canlı.
-- **Ortam etiketleri:** Kategori ipuçları + DeepSeek ile toplu etiketleme. Sadece iki şehrin merkez 3 km'si etiketlendi (İstanbul 7.319, Bakü 2.708 mekan). Kalan ~77.000 mekan etiketsiz (maliyet ~3,5 $, onay bekliyor).
-- **Arayüz gerçek veriye bağlı:** Ana sayfa araması (3 sonuç), keşfet sayfası, mekan detayı, yorum yazma, gerçek istatistikler, "How it works" demosu. Lovable tasarımı değiştirilmedi; sadece veri kaynağı değişti (`src/lib/venues/server.ts` tek köprü).
-- **Ölçüm:** Her arama `query_logs` tablosuna yazılır (cümle, niyet, sonuçlar, tıklanan mekan).
+- **Gerçek mekan verisi.** İstanbul'un tamamı (80.431) ve Bakü'nün tamamı (7.234) Supabase/PostGIS'te. Kaynak: OpenStreetMap + Overture Maps (açık veri). Sahte mekan yok; her kayıt kaynağına bağlı (`venue_sources`).
+- **Cümleyi anlama.** DeepSeek serbest metni yapılandırılmış niyete çevirir; DeepSeek yoksa kural tabanlı Türkçe/İngilizce çözümleyici devreye girer. Mutfak sözlüğü açık: "<x> mutfağı" kalıbı ve serbest anahtarlarla Özbek, Gürcü, Lübnan gibi listede olmayan mutfaklar da çalışır. 25 cümlelik test seti: kurallar 25/25, DeepSeek 24/25.
+- **Sıralama.** Deterministik puanlama: mutfak (zorunluluk), ortam, bütçe, mesafe, amaç, hava, kalite, ihtiyaçlar. LLM mekan seçmez. Açıklamalar puan bileşenlerinden üretilir ve kanıta göre ifade değişir ("uygun görünüyor" = tahmin, "iyi" = insan verisi). İstenen mutfak bulunamazsa arayüz bunu söyler.
+- **Coğrafi gerçekler.** Kıyıya uzaklık (`seaside`), Open-Meteo canlı hava, kullanıcı konumu (izin verilirse; yoksa şehir merkezi).
+- **Ortam etiketleri.** Kategori ipuçları + DeepSeek toplu etiketleme (şehir merkezlerinde 3 km; ~10.000 mekan). "Mekan değil" kayıtları kapatıldı.
+- **Yorum zekâsı katmanı (Nihat).** Tripadvisor Content API ile eşleştirme, yorumların DeepSeek ile yapılandırılmış kanıta dönüşmesi (`venue_intelligence`), sıralamaya kontrollü ek sinyal; `VENUE_INTELLIGENCE_ENABLED` ile açılıp kapanır. Pilot doğrulandı (Nergiz), tam çalıştırma yorum kaynağı kararına bağlı.
+- **Arayüz.** Ana sayfa araması (3 sonuç, konum, dürüst not, fiyat seviyesi), keşfet (sunucu tarafı filtreler, gerçek istatistikler), mekan detayı ve yorum yazma, "How it works" gerçek demo. Tasarım değişmedi; sadece veri kaynağı.
+- **Ölçüm.** Her arama ve tıklama `query_logs`'a yazılır; niyet test seti `scripts/eval/`.
 
-## 2. Bilinen zayıflık ve açık karar (BURADA KALDIK)
+## 2. Kalanlar (sırayla)
 
-**Sorun:** Mekanlar hakkında insan yorumu yok. Bu yüzden "romantik", "kebabı iyi", "servis yavaş" gibi atmosfer ve kalite yargıları tahminden ibaret (isim + kategori). Sistem mutfak/bütçe/mesafe/coğrafya için iyi, "gerçekten iyi mi" sorusu için zayıf.
+1. **Yorum verisi kaynağı kararı** — Tripadvisor resmi API tek başına mı, API + sınırlı scraper mı. Anahtar `.env` → `TRIPADVISOR_API_KEY`; betik hazır: `scripts/enrich/tripadvisor.mjs`, profil üretimi `scripts/enrich/profile-llm.mjs`.
+2. **Profil üretimini tüm eşleşen mekanlara yaymak** ve sıralamada "yorumlara göre …" cümlelerini görmek; 30 cümlelik sıralama testi (Ali puanlar).
+3. **Kalan ~77.000 mekanın ortam etiketlemesi** (~3,5 $ DeepSeek; onay bekliyor).
+4. **Çalışma saatleri** ("şu an açık mı") — veri sadece %2-10 mekanda var; kullanıcı bildirimi + Tripadvisor saatleriyle tamamlanacak.
+5. **Kategori temizliği** — düğün salonu, kantin gibi kayıtlar (LLM "mekan değil" bayrağı ilk adım).
+6. **Harita ve rota** (Etap 3): MapLibre + OpenFreeMap, OpenRouteService.
+7. **Hesap ve History** (Etap 4): Supabase Auth, kaydedilenler, ziyaretler, kullanıcı puanları.
+8. **Bakü şehir kartı için fotoğraf**; Londra/NY/Barselona/Paris kartları "Coming soon".
+9. Uzak sonuçlarda mesafeyi araç/toplu taşıma süresiyle göstermek (şu an yürüme dakikası).
 
-**Karar bekleyen seçenekler (Ali):**
+## 3. Gelecek (yatırım sonrası)
 
-1. **Sadece Tripadvisor resmi Content API** — ayda 5.000 çağrı ücretsiz, kayıtta kredi kartı + günlük bütçe limiti ister. Mekan başı ~3 çağrı → ayda ~1.600 mekan. Betik hazır: `scripts/enrich/tripadvisor.mjs` (anahtar: `.env` → `TRIPADVISOR_API_KEY`).
-2. **API + açık kaynak scraper** (önerilen): API eşleştirme ve puan için; en popüler 200-300 mekan için `github.com/algo7/TripAdvisor-Review-Scraper` ile 20-30 yorum. Proxy/CAPTCHA aşma yok; engellenirse durulur.
-3. Sadece scraper: mekan sayfalarını bulmak için Tripadvisor aramasını taramak gerekir, sağlam değil.
+- Google Places resmi API ile puan, fotoğraf ve saat tamamlama.
+- Toplu taşıma rotası; daha güçlü LLM.
+- Çiftler & arkadaşlar modu (orta nokta), avatarlar, fırsatlar, etkinlik planlama.
+- Kişiselleştirme: `query_logs` tıklama verisinden ağırlık ayarı.
 
-Anahtar gelince yapılacaklar (sırayla): yorumları çek → DeepSeek ile mekan profili yaz (`venues.profile`, `good_for[]`; tablolar hazır: `venue_external`, `venue_reviews_external`) → sıralama profil/`good_for` kullansın, açıklama "yorumlara göre …" desin → 30 cümlelik sıralama testi (Ali puanlar).
-
-## 3. Kurulum (yeni geliştirici)
+## 4. Kurulum
 
 ```bash
 npm install
-cp .env.example .env        # Supabase, DeepSeek anahtarlarını Ali'den al; asla commit etme
-node --env-file=.env scripts/db/apply-migrations.mjs   # şema zaten kurulu; idempotent
+cp .env.example .env        # anahtarları ekipten al; asla commit etme
+node --env-file=.env scripts/db/apply-migrations.mjs   # idempotent
 npm run dev                  # http://localhost:8080
 ```
 
-Supabase bağlantısı `SUPABASE_DB_URL` **session pooler** adresi olmalı (direct adres IPv6-only, çoğu ağda çalışmaz).
+`SUPABASE_DB_URL` **session pooler** adresi olmalı (direct adres IPv6-only). Vite yapılandırması `@lovable.dev/vite-tanstack-config` paketiyle geliyor: TanStack Start, React, Tailwind ve Nitro/Vercel derlemesini tek pakette toplayan bir preset; kendi Vite config'imizle değiştirmek backlog'da, deploy riski yüzünden şimdilik duruyor. Ürünle veya tasarımla ilgisi yok.
 
-## 4. Komutlar
+## 5. Komutlar
 
 | Amaç                                  | Komut                                                                                                              |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Niyet çözümleyici testi               | `node scripts/eval/intent-eval.mjs` (`--llm` ile DeepSeek de)                                                      |
 | Canlı öneri denemesi                  | `node --env-file=.env scripts/recommend-live.mjs Baku "cümle"`                                                     |
+| Ayrıntılı hata ayıklama               | `node --env-file=.env scripts/recommend-debug.mjs Istanbul "cümle" [lat] [lon]`                                    |
 | Kural/LLM karşılaştırma               | `node --env-file=.env scripts/intent-smoke.mjs "cümle"`                                                            |
 | OSM verisi (Overpass, küçük alan)     | `node scripts/data/fetch-osm.mjs <alan> S W N E`                                                                   |
 | OSM verisi (Geofabrik pbf, tüm şehir) | `python3 scripts/data/fetch-osm-pbf.py <alan> <pbf> S W N E`                                                       |
@@ -108,24 +116,25 @@ Supabase bağlantısı `SUPABASE_DB_URL` **session pooler** adresi olmalı (dire
 | Supabase'e yükleme                    | `node --env-file=.env scripts/db/load-venues.mjs data/venues-<alan>.json <City> <TRY/AZN>`                         |
 | Kıyı verisi                           | `python3 scripts/data/fetch-water.py <City> W S E N` → `node --env-file=.env scripts/data/load-water.mjs <City> …` |
 | Ortam etiketleme (DeepSeek)           | `node --env-file=.env scripts/tag/ambiance-llm.mjs --city Istanbul --radius-km 3 --limit 500 [--dry-run]`          |
-| Tripadvisor yorumları                 | `node --env-file=.env scripts/enrich/tripadvisor.mjs --city Baku --radius-km 3 --limit 300 [--dry-run]`            |
+| Tripadvisor eşleştirme + yorum        | `node --env-file=.env scripts/enrich/tripadvisor.mjs --city Baku --radius-km 3 --limit 300 [--dry-run]`            |
+| Yorum → profil                        | `node --env-file=.env scripts/enrich/profile-llm.mjs …`                                                            |
 
 Şehir bbox'ları `data/README.md` içinde. Python betikleri için: `pip3 install --user overturemaps osmium`.
 
-## 5. Dosya haritası
+## 6. Dosya haritası
 
-- `src/lib/recommend/` — motor: `intent.ts` (şema/sözlük), `rule-parser.ts`, `llm-parser.ts`, `scoring.ts` (ağırlıklar burada), `engine.ts` (uçtan uca akış)
+- `src/lib/recommend/` — motor: `intent.ts` (şema/sözlük), `rule-parser.ts`, `llm-parser.ts`, `scoring.ts` (ağırlıklar), `engine.ts` (uçtan uca akış), `venue-intelligence.ts` / `venue-evidence.ts` (yorum kanıtı)
 - `src/lib/venues/server.ts` — TanStack sunucu fonksiyonları; UI'nin tek veri kapısı
-- `src/lib/weather.ts` — Open-Meteo
-- `src/routes/*` — Lovable sayfaları (tasarıma dokunma; sadece veri bağlantıları değişti)
+- `src/hooks/use-user-position.ts` — konum izni
+- `src/routes/*` — sayfalar (tasarıma dokunma; sadece veri bağlantıları değişir)
 - `supabase/migrations/` — şema, sırayla uygulanır (`_migrations` tablosu takip eder)
-- `scripts/` — veri boru hattı, yükleyiciler, etiketleme, değerlendirme
+- `scripts/` — veri boru hattı, yükleyiciler, etiketleme, zenginleştirme, değerlendirme
 - `docs/MEETAP-TASKS.md` — etap etap görev listesi ve çalışma günlüğü (Notion'a import edilebilir)
 
-## 6. Kurallar
+## 7. Kurallar
 
-- Lovable arayüzünü (stil, düzen, JSX) değiştirme; veri kaynağı ve mantık `src/lib/*` içinde kalsın.
+- Onaylı tasarımı (stil, düzen, JSX) değiştirme; veri kaynağı ve mantık `src/lib/*` içinde kalsın.
 - Sahte mekan/yorum ekleme. Her kayıt gerçek bir kaynağa bağlı.
 - `.env` asla commit edilmez; anahtarlar sohbete yapıştırılmaz.
-- Ücretli servis kullanmadan önce ücretsiz alternatif kontrol edilir (DeepSeek çok ucuz: etiketleme ~4 sent / 1.000 mekan).
-- Git geçmişini yeniden yazma (Lovable senkronu bozulur).
+- Ücretli servis kullanmadan önce ücretsiz alternatif kontrol edilir.
+- Git geçmişini yeniden yazma (force-push yok).

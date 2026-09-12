@@ -1,13 +1,12 @@
-// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
-// or the app will break with duplicate plugins:
-//   - TanStack devtools (dev-only, first), tanstackStart, viteReact, tailwindcss, tsConfigPaths,
-//     nitro (build-only using cloudflare as a default target), VITE_* env injection, @ path alias,
-//     React/TanStack dedupe, error logger plugins, and sandbox detection (port/host/strictPort).
-// You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
+// Build preset: bundles TanStack Start, React, Tailwind, tsconfig paths and the
+// Nitro server build (Vercel) in one plugin set. It ships as an npm package from
+// the original scaffold; replacing it with a hand-written Vite config is on the
+// backlog but not worth the deploy risk right now. Do not add those plugins
+// again manually — duplicates break the app.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { loadEnv } from "vite";
 
-// Lovable's config only injects VITE_* variables. Server functions (Supabase
+// The preset only injects VITE_* variables. Server functions (Supabase
 // service role, DeepSeek) need the rest of .env too, so load it into process.env
 // for the dev/SSR process. In production these are set on the host instead.
 Object.assign(
