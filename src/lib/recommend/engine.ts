@@ -16,6 +16,7 @@ import {
   rankCandidates,
   type Candidate,
   type ScoredVenue,
+  type Weights,
 } from "./scoring.ts";
 import { validateVenueIntelligence, type VenueIntelligence } from "./venue-intelligence.ts";
 
@@ -40,6 +41,9 @@ export type RecommendInput = {
   city: keyof typeof CITY_CENTERS | string;
   lat?: number | null;
   lon?: number | null;
+  /** Browser-reported accuracy of lat/lon in metres (logged; wide fixes are
+   * already dropped client-side, see use-user-position.ts). */
+  accuracy_m?: number | null;
   locale?: "tr" | "en";
   limit?: number;
   /** "rules" skips the LLM (tests, offline, budget cap). */
@@ -110,7 +114,7 @@ export type RecommendResult = {
   /** Why the rules had to answer instead of the LLM (null when the LLM ran). */
   parser_fallback_reason: string | null;
   weather: CurrentWeather | null;
-  origin: { lat: number; lon: number; source: "user" | "city_center" };
+  origin: { lat: number; lon: number; source: "user" | "city_center"; accuracy_m: number | null };
   candidates: number;
   results: Recommendation[];
   coverage: Coverage;
@@ -466,8 +470,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     input.lon != null &&
     haversineMeters(input.lat, input.lon, center.lat, center.lon) <= MAX_USER_LOCATION_DRIFT_M;
   const origin = userLocationInCity
-    ? { lat: input.lat!, lon: input.lon!, source: "user" as const }
-    : { lat: center.lat, lon: center.lon, source: "city_center" as const };
+    ? {
+        lat: input.lat!,
+        lon: input.lon!,
+        source: "user" as const,
+        accuracy_m: input.accuracy_m ?? null,
+      }
+    : { lat: center.lat, lon: center.lon, source: "city_center" as const, accuracy_m: null };
 
   const supabase = serviceClient();
 
@@ -593,10 +602,11 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   const rpc = async (
     radius: number,
     extra: { tags?: string[]; cuisines?: string[]; nameKeywords?: string[] } = {},
+    at: { lat: number; lon: number } = origin,
   ) => {
     const { data, error } = await supabase.rpc("venues_nearby", {
-      p_lat: origin.lat,
-      p_lon: origin.lon,
+      p_lat: at.lat,
+      p_lon: at.lon,
       p_radius_m: radius,
       p_city: input.city,
       // No category in the sentence, or the category was only *inferred* from
@@ -626,14 +636,16 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       : (CUISINE_POOL_ALIASES[c] ?? [c]),
   );
   const nameKeywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
-  const fetchNearby = async (radius: number) => {
+  const fetchNearby = async (radius: number, at: { lat: number; lon: number } = origin) => {
     const sets = await Promise.all([
-      rpc(radius),
-      wantedTags.length ? rpc(radius, { tags: wantedTags }) : Promise.resolve([]),
-      cuisineAliases.length ? rpc(radius, { cuisines: cuisineAliases }) : Promise.resolve([]),
+      rpc(radius, {}, at),
+      wantedTags.length ? rpc(radius, { tags: wantedTags }, at) : Promise.resolve([]),
+      cuisineAliases.length ? rpc(radius, { cuisines: cuisineAliases }, at) : Promise.resolve([]),
       // Venues the open data typed as a generic restaurant but whose NAME says
       // what they serve ("Özbek Sofrası") – found by keyword, city-wide radius.
-      nameKeywords.length ? rpc(Math.max(radius, 25000), { nameKeywords }) : Promise.resolve([]),
+      nameKeywords.length
+        ? rpc(Math.max(radius, 25000), { nameKeywords }, at)
+        : Promise.resolve([]),
     ]);
     const byId = new Map<string, VenueRow>();
     for (const set of sets) for (const row of set) byId.set(row.id, row);
@@ -664,11 +676,12 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       }
     : undefined;
   let coverage: Coverage = { applied: [], unverifiable: [] };
+  let weights: Weights = DEFAULT_WEIGHTS;
   const rankPool = (base: Intent, pool: VenueRow[], count?: typeof tally) => {
     const candidates = pool.map((r) => toCandidate(r, intelMap.get(r.id)));
     const split = splitByCoverage(base, candidates, locale);
     coverage = split.coverage;
-    return rankCandidates(split.scoring, candidates, ctx, DEFAULT_WEIGHTS, count);
+    return rankCandidates(split.scoring, candidates, ctx, weights, count);
   };
   let ranked = rankPool(intent, rows, tally);
   const candidatesAfterHardFilters = ranked.length;
@@ -685,6 +698,35 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       );
       ranked = rankPool(intent, rows);
     }
+  }
+
+  // Nothing walkable from the user's own location (outskirts, or a browser
+  // fix that is simply wrong): a car is needed either way, so 96 vs 105
+  // minutes on foot must not decide the order. Bring in the city-centre pool
+  // as well and let the evidence we have (tags, quality) matter more than
+  // the last few kilometres. The UI says so (far_from_user).
+  // (Serving at least one of several asked-for cuisines scores ≥ 0.6; an
+  // unknown kitchen scores 0.35 – see scoreCuisine.)
+  const SERVES = 0.6;
+  const serves = (s: ScoredVenue) =>
+    intent.cuisines.length === 0 || (s.components.cuisine ?? 0) >= SERVES;
+  const onFoot = intent.transport == null || intent.transport === "walking";
+  if (
+    origin.source === "user" &&
+    onFoot &&
+    ranked.some(serves) &&
+    !ranked.some((s) => serves(s) && s.distance_min <= 60)
+  ) {
+    const centreRows = await fetchNearby(baseRadius * 2, center);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const r of centreRows) byId.set(r.id, r);
+    rows = [...byId.values()];
+    intelMap = await loadIntelligenceMap(
+      supabase,
+      rows.map((r) => r.id),
+    );
+    weights = { ...DEFAULT_WEIGHTS, distance: 0.35 };
+    ranked = rankPool(intent, rows);
   }
 
   // Fallback ladder: a filtered pool should never silently collapse to zero
@@ -745,11 +787,8 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
 
   // A named cuisine is a requirement, not a preference: when places that
   // clearly serve it exist, a closer place that doesn't must not outrank them.
-  // (Serving at least one of several asked-for cuisines scores ≥ 0.6; an
-  // unknown kitchen scores 0.35 – see scoreCuisine.)
-  const SERVES = 0.6;
   if (intent.cuisines.length) {
-    const serving = ranked.filter((s) => (s.components.cuisine ?? 0) >= SERVES);
+    const serving = ranked.filter(serves);
     if (serving.length) ranked = serving;
   }
   // One entry per name: three branches of the same chain are one answer, not three.
@@ -805,6 +844,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         parser_error: parsed.fallback_reason ?? null,
         city: input.city,
         user_location: `SRID=4326;POINT(${origin.lon} ${origin.lat})`,
+        user_location_accuracy_m: origin.source === "user" ? (input.accuracy_m ?? null) : null,
         weather,
         results: results.map((r) => ({
           venue_id: r.venue.id,

@@ -430,6 +430,7 @@ export const recommendVenues = createServerFn({ method: "POST" })
         city: z.string(),
         lat: z.number().nullable().default(null),
         lon: z.number().nullable().default(null),
+        accuracy_m: z.number().nullable().default(null),
         limit: z.number().int().min(1).max(20).default(6),
         /** "rules" skips the LLM – used by the How-it-works demo. */
         parser: z.enum(["auto", "rules"]).default("auto"),

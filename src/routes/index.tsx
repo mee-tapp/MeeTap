@@ -107,6 +107,7 @@ function Index() {
             limit: 3,
             lat: position?.lat ?? null,
             lon: position?.lon ?? null,
+            accuracy_m: position?.accuracy_m ?? null,
           },
         }),
         new Promise((resolve) => setTimeout(resolve, 1200)),
@@ -282,7 +283,13 @@ function Index() {
                 <Context
                   icon={Footprints}
                   value={foundVenue.time}
-                  sub={result?.origin.source === "user" ? "From you" : "From city centre"}
+                  sub={
+                    result?.origin.source !== "user"
+                      ? "From city centre"
+                      : result.origin.accuracy_m != null && result.origin.accuracy_m > 1000
+                        ? `From you (±${Math.round(result.origin.accuracy_m / 1000)} km)`
+                        : "From you"
+                  }
                 />
               </div>
             </div>

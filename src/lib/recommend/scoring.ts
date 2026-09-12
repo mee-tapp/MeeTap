@@ -446,7 +446,9 @@ function scoreDistance(
     intent.transport === "car" ? 400 : intent.transport === "transit" ? 250 : WALK_M_PER_MIN;
   const minutes = Math.max(1, Math.round(meters / speed));
   const limit = intent.max_distance_min ?? (intent.transport === "car" ? 30 : 30);
-  const score = Math.max(0, 1 - minutes / (limit * 1.5));
+  // Smooth decay instead of a hard zero: when everything is far, 100 minutes
+  // must still beat 139 – a flat 0 let budget guesses decide the order.
+  const score = Math.exp(-minutes / (limit * 1.2));
   const walkLabel =
     intent.transport === "car"
       ? t(locale, "araçla", "by car")
