@@ -448,15 +448,28 @@ export const recommendVenues = createServerFn({ method: "POST" })
         distanceMin: r.distance_min,
       }),
     );
-    const notice =
-      out.fallback_used === "no_cuisine_match"
-        ? "We couldn't find a place that clearly serves that cuisine nearby, so these are the closest matches."
-        : out.fallback_used && out.fallback_used !== "relaxed_filters"
-          ? "Few exact matches nearby, so we widened the search."
-          : null;
+    // One honest line above the results: how the sentence was read, what we
+    // could not check, and whether everything shown is far away.
+    const lines: string[] = [];
+    if (data.parser !== "rules" && out.parser_fallback_reason)
+      lines.push(
+        "Basic understanding mode: the AI parser isn't available right now, so some details of your request may be ignored.",
+      );
+    if (out.fallback_used === "no_cuisine_match")
+      lines.push(
+        "We couldn't find a place that clearly serves that cuisine nearby, so these are the closest matches.",
+      );
+    else if (out.fallback_used && out.fallback_used !== "relaxed_filters")
+      lines.push("Few exact matches nearby, so we widened the search.");
+    if (out.coverage.unverifiable.length)
+      lines.push(`Not in our data yet, so not checked: ${out.coverage.unverifiable.join(", ")}.`);
+    if (out.far_from_user)
+      lines.push("Nothing matching is within walking distance, so these are the nearest matches.");
+    const notice = lines.length ? lines.join(" ") : null;
     return {
       results,
       notice,
+      coverage: out.coverage,
       query_log_id: out.query_log_id,
       weather: out.weather
         ? {

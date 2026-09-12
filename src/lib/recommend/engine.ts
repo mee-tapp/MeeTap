@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getCurrentWeather, type CurrentWeather } from "../weather.ts";
-import { emptyIntent, type Intent, type ParsedIntent } from "./intent.ts";
+import { emptyIntent, type Intent, type Need, type ParsedIntent, type Purpose } from "./intent.ts";
 import { parseIntentWithLlm } from "./llm-parser.ts";
 import { parseIntentWithRules } from "./rule-parser.ts";
 import {
@@ -10,7 +10,9 @@ import {
   haversineMeters,
   labelAspect,
   labelCaution,
+  labelCuisine,
   labelGoodFor,
+  labelTag,
   rankCandidates,
   type Candidate,
   type ScoredVenue,
@@ -90,18 +92,120 @@ export type Recommendation = {
   components: ScoredVenue["components"];
 };
 
+/**
+ * What the answer is actually based on. `applied` = criteria we could check
+ * against real data; `unverifiable` = wishes we understood but have no data
+ * for (a private room, a dessert menu, halal…) – shown to the user instead
+ * of silently pretending they were considered. Labels follow the query
+ * language; `unverifiable` also carries the parser's own `unmapped` phrases.
+ */
+export type Coverage = { applied: string[]; unverifiable: string[] };
+
 export type RecommendResult = {
   intent: Intent;
   parser: ParsedIntent["parser"];
+  /** Why the rules had to answer instead of the LLM (null when the LLM ran). */
+  parser_fallback_reason: string | null;
   weather: CurrentWeather | null;
   origin: { lat: number; lon: number; source: "user" | "city_center" };
   candidates: number;
   results: Recommendation[];
+  coverage: Coverage;
+  /** Every shown result is over an hour's walk from the user's own location. */
+  far_from_user: boolean;
   query_log_id: string | null;
   mode?: "discovery" | "named_venue";
   fallback_used?: string | null;
   debug?: RecommendDebug | null;
 };
+
+/** Needs the venue data can actually answer today (wifi field). */
+const CHECKABLE_NEEDS = new Set<Need>(["wifi", "power_outlets"]);
+const NEED_LABEL: Record<Need, [string, string]> = {
+  wifi: ["wifi", "wifi"],
+  power_outlets: ["priz", "power outlets"],
+  vegetarian: ["vejetaryen seçenek", "vegetarian options"],
+  vegan: ["vegan seçenek", "vegan options"],
+  halal: ["helal", "halal"],
+  wheelchair: ["tekerlekli sandalye erişimi", "wheelchair access"],
+  kid_friendly: ["çocuklara uygunluk", "kid friendliness"],
+  smoking_area: ["sigara alanı", "smoking area"],
+  no_smoking: ["sigarasız alan", "non-smoking area"],
+};
+const PURPOSE_LABEL: Record<Purpose, [string, string]> = {
+  date: ["randevu", "date"],
+  friends: ["arkadaş buluşması", "meeting friends"],
+  study: ["çalışma", "studying"],
+  alone: ["tek başına", "time alone"],
+  family: ["aile", "family"],
+  business: ["iş görüşmesi", "business"],
+};
+
+/**
+ * Split the intent into what this candidate pool can verify and what it
+ * cannot. A required ambiance tag that NO venue in the pool carries would
+ * otherwise push every result down with "atmosphere may not match" – that is
+ * missing data, not a mismatch, so the tag is reported as unverifiable and
+ * left out of scoring. Same for needs we have no field for.
+ */
+function splitByCoverage(
+  intent: Intent,
+  pool: Candidate[],
+  locale: "tr" | "en",
+): { scoring: Intent; coverage: Coverage } {
+  const poolTags = new Set(pool.flatMap((c) => c.ambiance_tags));
+  const lbl = (pair: [string, string]) => (locale === "tr" ? pair[0] : pair[1]);
+  const applied: string[] = [];
+  const unverifiable: string[] = [];
+
+  const allOf = intent.ambiance.all_of.filter((tag) => {
+    const ok = poolTags.has(tag);
+    (ok ? applied : unverifiable).push(labelTag(tag, locale));
+    return ok;
+  });
+  const anyOf = intent.ambiance.any_of
+    .map((group) => {
+      const kept = group.filter((tag) => poolTags.has(tag));
+      for (const tag of group)
+        (kept.includes(tag) ? applied : unverifiable).push(labelTag(tag, locale));
+      return kept;
+    })
+    .filter((group) => group.length > 0);
+  const needs = intent.needs.filter((need) => {
+    const ok = CHECKABLE_NEEDS.has(need);
+    (ok ? applied : unverifiable).push(lbl(NEED_LABEL[need]));
+    return ok;
+  });
+
+  for (const c of intent.cuisines) applied.push(labelCuisine(c, locale));
+  if (intent.purpose) applied.push(lbl(PURPOSE_LABEL[intent.purpose]));
+  if (intent.budget.max_per_person != null)
+    applied.push(
+      `≤ ${intent.budget.max_per_person} ${intent.budget.currency ?? ""}`.trim() +
+        lbl([" kişi başı", " per person"]),
+    );
+  else if (intent.budget.level)
+    applied.push(
+      lbl(
+        {
+          low: ["düşük bütçe", "low budget"],
+          mid: ["orta bütçe", "mid budget"],
+          high: ["yüksek bütçe", "high budget"],
+        }[intent.budget.level] as [string, string],
+      ),
+    );
+  if (intent.max_distance_min != null)
+    applied.push(`≤ ${intent.max_distance_min} ${lbl(["dk", "min"])}`);
+  unverifiable.push(...intent.unmapped);
+
+  return {
+    scoring: { ...intent, needs, ambiance: { ...intent.ambiance, all_of: allOf, any_of: anyOf } },
+    coverage: {
+      applied: [...new Set(applied)],
+      unverifiable: [...new Set(unverifiable)],
+    },
+  };
+}
 
 let cached: SupabaseClient | null = null;
 export function serviceClient(): SupabaseClient {
@@ -340,14 +444,14 @@ const MAX_USER_LOCATION_DRIFT_M = 60_000;
  * translation set for one extra language.
  */
 function detectQueryLocale(raw: string): "tr" | "en" {
-  if (/[çğıöşüəÇĞİIÖŞÜƏ]/.test(raw)) return "tr"; // tr/az diacritics ('ə' = az-only)
   const text = raw.toLowerCase();
-  if (
-    /\b(bir|için|icin|istiyorum|istiyoruz|olsun|olmasin|olmayan|yerde|yakin|sevgilim|arkadaslarimla|restoran|kahve|ucun|olan)\b/.test(
-      text,
-    )
-  )
-    return "tr";
+  // Turkish / Azerbaijani function words and verb forms (typed with or without diacritics).
+  const trWords =
+    /\b(bir|için|icin|ucun|üçün|istiyorum|istiyoruz|isteyirem|istəyirəm|isteyirik|olsun|olsa|olmasin|olmasın|olmayan|olan|yerde|yerdə|yakin|yakın|sevgilim|sevgilimle|sevgilimlə|arkadaslarimla|arkadaşlarımla|ailemle|aileynen|ailəynən|gidecegim|gideceğim|gedecem|gedəcəm|gedek|gedirik|restoran|restorani|restoranı|kahve|yaxsi|yaxşı|bele|belə|axtariram|lazimdir)\b/;
+  const enWords = /\b(i|we|a|an|the|with|and|for|near|some|somewhere|place|want|looking|where|good|nice|cheap|quiet|my)\b/;
+  if (trWords.test(text)) return "tr";
+  // Diacritics alone are not enough: "near Kadıköy" is still an English sentence.
+  if (/[çğıöşüəÇĞİÖŞÜƏ]/.test(raw) && !enWords.test(text)) return "tr";
   return "en";
 }
 
@@ -457,10 +561,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       return {
         intent: emptyIntent(),
         parser: "rules",
+        parser_fallback_reason: null,
         weather: null,
         origin,
         candidates: 1,
         results: [rec],
+        coverage: { applied: [], unverifiable: [] },
+        far_from_user: false,
         query_log_id: null,
         mode: "named_venue",
         fallback_used: null,
@@ -531,7 +638,9 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     rows.map((r) => r.id),
   );
 
-  // 3. Deterministic ranking + template explanations.
+  // 3. Deterministic ranking + template explanations. Every ranking pass goes
+  //    through the coverage split, so a wish the pool has no data for is
+  //    reported instead of scored.
   const candidatesBeforeFilters = rows.length;
   const exclusions = { category: 0, cuisine: 0, open_now: 0 };
   const tally = input.debug
@@ -539,13 +648,14 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         exclusions[reason] += 1;
       }
     : undefined;
-  let ranked = rankCandidates(
-    intent,
-    rows.map((r) => toCandidate(r, intelMap.get(r.id))),
-    ctx,
-    DEFAULT_WEIGHTS,
-    tally,
-  );
+  let coverage: Coverage = { applied: [], unverifiable: [] };
+  const rankPool = (base: Intent, pool: VenueRow[], count?: typeof tally) => {
+    const candidates = pool.map((r) => toCandidate(r, intelMap.get(r.id)));
+    const split = splitByCoverage(base, candidates, locale);
+    coverage = split.coverage;
+    return rankCandidates(split.scoring, candidates, ctx, DEFAULT_WEIGHTS, count);
+  };
+  let ranked = rankPool(intent, rows, tally);
   const candidatesAfterHardFilters = ranked.length;
 
   // If the user asked for a cuisine and only a handful of venues nearby actually
@@ -558,11 +668,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         supabase,
         rows.map((r) => r.id),
       );
-      ranked = rankCandidates(
-        intent,
-        rows.map((r) => toCandidate(r, intelMap.get(r.id))),
-        ctx,
-      );
+      ranked = rankPool(intent, rows);
     }
   }
 
@@ -577,11 +683,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       category_explicit: false,
       confidence: Math.min(intent.confidence, 0.3),
     };
-    ranked = rankCandidates(
-      relaxed,
-      rows.map((r) => toCandidate(r)),
-      ctx,
-    );
+    ranked = rankPool(relaxed, rows);
     if (ranked.length) fallbackUsed = "relaxed_filters";
   }
   if (ranked.length === 0) {
@@ -591,18 +693,10 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       const widerRows = await fetchNearby(widerRadius);
       if (widerRows.length > rows.length) {
         rows = widerRows;
-        ranked = rankCandidates(
-          intent,
-          rows.map((r) => toCandidate(r)),
-          ctx,
-        );
+        ranked = rankPool(intent, rows);
         if (ranked.length === 0) {
           const relaxed: Intent = { ...intent, category_explicit: false, confidence: 0 };
-          ranked = rankCandidates(
-            relaxed,
-            rows.map((r) => toCandidate(r)),
-            ctx,
-          );
+          ranked = rankPool(relaxed, rows);
         }
         if (ranked.length) fallbackUsed = fallbackUsed ?? "wider_radius";
       }
@@ -624,28 +718,23 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     if (broadRows.length) {
       rows = broadRows;
       const relaxed: Intent = { ...intent, category_explicit: false, confidence: 0 };
-      ranked = rankCandidates(
-        relaxed,
-        rows.map((r) => toCandidate(r)),
-        ctx,
-      );
+      ranked = rankPool(relaxed, rows);
       if (ranked.length) fallbackUsed = "broader_category";
     }
   }
   if (ranked.length === 0 && rows.length > 0) {
     // 4. Never return zero if any venue exists nearby — rank on distance/quality only.
-    ranked = rankCandidates(
-      emptyIntent(),
-      rows.map((r) => toCandidate(r)),
-      ctx,
-    );
+    ranked = rankPool(emptyIntent(), rows);
     fallbackUsed = "distance_quality_only";
   }
 
   // A named cuisine is a requirement, not a preference: when places that
   // clearly serve it exist, a closer place that doesn't must not outrank them.
+  // (Serving at least one of several asked-for cuisines scores ≥ 0.6; an
+  // unknown kitchen scores 0.35 – see scoreCuisine.)
+  const SERVES = 0.6;
   if (intent.cuisines.length) {
-    const serving = ranked.filter((s) => (s.components.cuisine ?? 0) >= 0.9);
+    const serving = ranked.filter((s) => (s.components.cuisine ?? 0) >= SERVES);
     if (serving.length) ranked = serving;
   }
   // One entry per name: three branches of the same chain are one answer, not three.
@@ -664,10 +753,17 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   if (
     intent.cuisines.length &&
     shown.length &&
-    !shown.some((s) => (s.components.cuisine ?? 0) >= 0.9)
+    !shown.some((s) => (s.components.cuisine ?? 0) >= SERVES)
   ) {
     fallbackUsed = fallbackUsed ?? "no_cuisine_match";
   }
+  // Honesty check 2: the user shared their location and nothing we show is
+  // reachable on foot – say so rather than labelling an 11 km walk "a bit far".
+  const farFromUser =
+    origin.source === "user" &&
+    (intent.transport == null || intent.transport === "walking") &&
+    shown.length > 0 &&
+    shown.every((s) => s.distance_min > 60);
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const results: Recommendation[] = ranked.slice(0, input.limit ?? 10).map((s) => ({
@@ -691,6 +787,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         raw_query: input.query,
         parsed_intent: intent,
         parser: parsed.parser,
+        parser_error: parsed.fallback_reason ?? null,
         city: input.city,
         user_location: `SRID=4326;POINT(${origin.lon} ${origin.lat})`,
         weather,
@@ -710,10 +807,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   return {
     intent,
     parser: parsed.parser,
+    parser_fallback_reason: parsed.fallback_reason ?? null,
     weather,
     origin,
     candidates: rows.length,
     results,
+    coverage,
+    far_from_user: farFromUser,
     query_log_id: queryLogId,
     mode: "discovery",
     fallback_used: fallbackUsed,

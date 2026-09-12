@@ -87,6 +87,8 @@ Rules:
 - "sakin / sessiz" → "quiet"; "canlı müzik" → "live_music" (NOT "lively"); "manzara / boğaz" → "view"; "bahçe / teras / açık hava" → "outdoor"; "yağmur / soğuk" → all_of "indoor" and weather_sensitive true.
 - "sahil / deniz kenarı / seaside / by the sea / waterfront / Boğaz kenarı" → "seaside" (a location fact: the place is at the shore). "manzara / view" → "view". Both may apply.
 - "yakın / yürüme mesafesi" → transport "walking", max_distance_min 15–20.
+- "cuisines" is only the MAIN kitchen the user wants to eat at (what kind of restaurant), main one FIRST. A side wish at that restaurant ("tatlıları güzel olsun", "dadlı şirniyyatlar olan", "kahvesi iyi olsun") is NOT a cuisine – put it in "unmapped". Make "dessert" / "coffee" a cuisine only when the user wants a dessert or coffee place itself.
+- Anything with no matching field or tag – private room / kabinet / loca, nargile, parking, pet friendly, karaoke, a specific dish, a celebration ("yıl dönümü") – goes into "unmapped" as a short phrase in the user's own language. NEVER approximate it with an ambiance tag, need or cuisine ("kabinet" is NOT "indoor"; "yıl dönümü" is NOT "romantic" unless the user said so).
 - Never invent constraints the user did not state. Prefer null / empty over guessing.`;
 
 /** Dish words that appear in thousands of venue names – useless as cuisine keywords. */
@@ -145,7 +147,7 @@ export async function parseIntentWithLlm(
 ): Promise<LlmParseResult> {
   const rules = parseIntentWithRules(raw);
   const cfg = providerConfig();
-  if (!cfg) return rules;
+  if (!cfg) return { ...rules, fallback_reason: "llm_not_configured" };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);
@@ -210,8 +212,9 @@ export async function parseIntentWithLlm(
       model: cfg.model,
     };
   } catch (err) {
-    console.warn(`[intent] LLM parse failed, using rules: ${(err as Error).message}`);
-    return rules;
+    const message = (err as Error).name === "AbortError" ? "timeout" : (err as Error).message;
+    console.warn(`[intent] LLM parse failed, using rules: ${message}`);
+    return { ...rules, fallback_reason: message.slice(0, 200) };
   } finally {
     clearTimeout(timer);
   }

@@ -159,6 +159,8 @@ export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: 
 }
 
 const WALK_M_PER_MIN = 80;
+/** Rough urban driving pace (~30 km/h) for the "by car" hint on far results. */
+const CAR_M_PER_MIN = 500;
 
 function t(locale: "tr" | "en", tr: string, en: string): string {
   return locale === "tr" ? tr : en;
@@ -177,47 +179,71 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
   const rawType = (c.raw_type ?? "").toLowerCase();
   const name = c.name.toLowerCase();
 
-  // 1. Data says so: exact key, then genuine aliases, then the open-data type
-  //    itself ("uzbek_restaurant" satisfies "uzbek").
-  const exact = intent.cuisines.find((want) => have.includes(want));
-  const aliased =
-    exact ?? intent.cuisines.find((w) => have.some((h) => (CUISINE_ALIASES[w] ?? [w]).includes(h)));
-  const byType =
-    aliased ?? intent.cuisines.find((w) => rawType === w || rawType.startsWith(`${w}_`));
-  if (byType) {
-    return {
-      score: 1,
-      reason: t(
-        locale,
-        `${labelCuisine(byType, "tr")} var`,
-        `serves ${labelCuisine(byType, "en")}`,
-      ),
-    };
+  // Evidence per requested cuisine, strongest first:
+  //   1. the data says so (exact key, genuine alias, or the open-data type
+  //      itself – "uzbek_restaurant" satisfies "uzbek");
+  //   2. the venue's own NAME says so ("Özbek Sofrası");
+  //   3. nothing – the venue may still serve it, we just can't tell.
+  // With several cuisines asked for ("Azerbaijani food and good desserts"),
+  // a place matching more of them ranks higher, and the explanation says
+  // which part we could confirm and which we could not.
+  const byData: string[] = [];
+  const byName: string[] = [];
+  const missing: string[] = [];
+  const keywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
+  let nameUsed = false;
+  for (const want of intent.cuisines) {
+    const aliases = CUISINE_ALIASES[want] ?? [want];
+    const inData =
+      have.some((h) => aliases.includes(h)) || rawType === want || rawType.startsWith(`${want}_`);
+    if (inData) {
+      byData.push(want);
+      continue;
+    }
+    // Name keywords are not attributed to a specific cuisine; they describe
+    // the main one, so the first unconfirmed cuisine gets the credit once.
+    if (!nameUsed && keywords.some((k) => wordInName(name, k))) {
+      byName.push(want);
+      nameUsed = true;
+      continue;
+    }
+    missing.push(want);
   }
-  // 2. The venue's own name says so ("Özbek Sofrası", "Semerkand Lokantası").
-  const keyword = intent.cuisine_keywords.find((k) => k.length >= 3 && wordInName(name, k));
-  if (keyword) {
-    const key = intent.cuisines[0] ?? keyword;
-    return {
-      score: 0.95,
-      reason: t(
-        locale,
-        `${labelCuisine(key, "tr")} (adına göre)`,
-        `${labelCuisine(key, "en")} (by name)`,
-      ),
-    };
+
+  // The first cuisine is the main one ("an Azerbaijani place with desserts"):
+  // it weighs 1, every further one 0.5, so a dessert-only café cannot tie
+  // with a real Azerbaijani restaurant that just lacks dessert data.
+  const weight = (key: string) => (key === intent.cuisines[0] ? 1 : 0.5);
+  const totalWeight = intent.cuisines.reduce((sum, k) => sum + weight(k), 0);
+  const matched =
+    byData.reduce((sum, k) => sum + weight(k), 0) +
+    0.95 * byName.reduce((sum, k) => sum + weight(k), 0);
+  if (matched === 0) {
+    if (c.cuisines.length === 0) {
+      return { score: 0.35 }; // unknown – don't punish hard, real data is sparse
+    }
+    // Known cuisine, and it's something else. Only a hard exclude when the parse
+    // itself is confident – an uncertain read of the sentence should downrank,
+    // not silently drop, a candidate that might still be right.
+    if (intent.confidence >= 0.5) return { score: 0, exclude: true };
+    return { score: 0.15, reason: t(locale, "mutfak belirsiz", "cuisine uncertain") };
   }
-  if (c.cuisines.length === 0) {
-    return { score: 0.35 }; // unknown – don't punish hard, real data is sparse
-  }
-  // Known cuisine, and it's something else. Only a hard exclude when the parse
-  // itself is confident – an uncertain read of the sentence should downrank,
-  // not silently drop, a candidate that might still be right.
-  if (intent.confidence >= 0.5) return { score: 0, exclude: true };
-  return { score: 0.15, reason: t(locale, "mutfak belirsiz", "cuisine uncertain") };
+
+  // One cuisine confirmed by data = 1 (as before); a partial match on a
+  // multi-cuisine wish lands at 0.6–1 so it still counts as "serves it".
+  const score = intent.cuisines.length === 1 ? matched : 0.6 + 0.4 * (matched / totalWeight);
+  const labels = (keys: string[]) => keys.map((k) => labelCuisine(k, locale)).join(", ");
+  const parts: string[] = [];
+  if (byData.length) parts.push(t(locale, `${labels(byData)} var`, `serves ${labels(byData)}`));
+  if (byName.length)
+    parts.push(t(locale, `${labels(byName)} (adına göre)`, `${labels(byName)} (by name)`));
+  let reason = parts.join(", ");
+  if (missing.length)
+    reason += t(locale, ` (${labels(missing)} bilgisi yok)`, ` (no ${labels(missing)} info)`);
+  return { score, reason };
 }
 
-function labelCuisine(key: string, locale: "tr" | "en"): string {
+export function labelCuisine(key: string, locale: "tr" | "en"): string {
   const L: Record<string, [string, string]> = {
     kebab: ["kebap", "kebab"],
     home_cooking: ["ev yemekleri", "home-style food"],
@@ -387,6 +413,13 @@ function scoreDistance(
       : intent.transport === "transit"
         ? t(locale, "toplu taşımayla", "by transit")
         : t(locale, "yürüme", "walk");
+  // Beyond twice the limit "a bit far" would be a lie: say it is far, and –
+  // when the user did not mention a car – how long the drive roughly is.
+  const carMinutes = Math.max(5, Math.round((meters * 1.3) / CAR_M_PER_MIN));
+  const carHint =
+    intent.transport == null || intent.transport === "walking"
+      ? t(locale, ` (arabayla ~${carMinutes} dk)`, ` (~${carMinutes} min by car)`)
+      : "";
   const reason =
     minutes <= limit * 0.5
       ? t(
@@ -394,13 +427,19 @@ function scoreDistance(
           `${minutes} dk ${walkLabel}, çok yakın`,
           `${minutes} min ${walkLabel}, very close`,
         )
-      : minutes > limit
+      : minutes > limit * 2
         ? t(
             locale,
-            `${minutes} dk ${walkLabel}, biraz uzak`,
-            `${minutes} min ${walkLabel}, a bit far`,
+            `${minutes} dk ${walkLabel}, uzak${carHint}`,
+            `${minutes} min ${walkLabel}, far${carHint}`,
           )
-        : t(locale, `${minutes} dk ${walkLabel}`, `${minutes} min ${walkLabel}`);
+        : minutes > limit
+          ? t(
+              locale,
+              `${minutes} dk ${walkLabel}, biraz uzak`,
+              `${minutes} min ${walkLabel}, a bit far`,
+            )
+          : t(locale, `${minutes} dk ${walkLabel}`, `${minutes} min ${walkLabel}`);
   return { score, reason, minutes };
 }
 

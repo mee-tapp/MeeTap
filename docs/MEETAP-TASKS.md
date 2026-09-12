@@ -57,6 +57,9 @@ Kurallar:
 - [x] ✅ Ağırlık tablosu tek yerde, ayarlanabilir
 - [x] ✅ Şablon açıklama üretimi ("Bütçene uygun · 8 dk yürüme · sakin")
 - [ ] Artı/eksi (trade-off) çıkarımı: ilk 3 sonuç için "daha ucuz ama kalabalık" tarzı karşılaştırma
+- [x] ✅ Kapsama raporu: kontrol edilebilen / edilemeyen kriterler (`coverage`), eşlenemeyen istekler puanlamadan çıkar ve arayüzde "Not in our data yet, so not checked: …" notu; çok mutfaklı istekte ana mutfak önce, kısmi eşleşme açıklanır; uzak sonuçlarda "arabayla ~X dk" ve ayrı not
+- [x] ✅ LLM düşüş nedeni telemetrisi (`query_logs.parser_error`, migration 0015) + arayüzde "Basic understanding mode" notu
+- [ ] **Vercel ortam değişkenleri: `LLM_PROVIDER`, `DEEPSEEK_API_KEY` eklenecek** (canlı site hâlâ kural çözümleyicisinde — README bölüm 2, madde 0)
 - [x] ✅ Sunucu fonksiyonları (`src/lib/venues/server.ts`): recommendVenues, fetchVenues, fetchFeatured, fetchVenue, submitReview
 - [x] ✅ Open-Meteo hava durumu entegrasyonu — `src/lib/weather.ts`
 - [x] ✅ Ana sayfa arama kutusu gerçek motora bağlı (animasyon aynı, sonuç kartı gerçek mekan + gerçek hava + tahmini bütçe + mesafe); öne çıkanlar ve harita pinleri gerçek
@@ -106,6 +109,12 @@ Kurallar:
 - **2026-09-12 (akşam)** — Nihat: venue intelligence katmanı, Tripadvisor pilotu (Nergiz), Google fotoğraf pilotu, Vercel deploy. Ali'nin testleri üzerine: açık mutfak sözlüğü, dürüst açıklamalar, konum izni düzeltmesi, fiyat seviyesi gösterimi, şube tekilleştirme. Scaffold kalıntıları temizlendi (AGENTS.md, bun dosyaları, editör hata raporlama); build preset paketi deploy riski yüzünden kaldı.
 - **2026-09-12** — "Deniz kenarı" artık coğrafi gerçek: Overture su poligonlarından kıyı çizgisi çıkarıldı, her mekanın kıyıya uzaklığı hesaplandı (İstanbul 6.316, Bakü 211 mekan ≤150 m). Niyet sözlüğüne `seaside` eklendi. Ana sayfa kartı 3 sonuç gösteriyor. Kategori söylenmezse varsayılan kafe/restoran/bar. Kural çözümleyici için 20 cümlelik değerlendirme seti eklendi.
 - **2026-09-11 (geç gece)** — Arayüz gerçek veriye bağlandı (ana sayfa arama + öne çıkanlar, keşfet, detay + yorum). Tasarım dosyalarına dokunulmadı; sadece veri kaynağı değişti, fotoğraf yerine kategori ikonu, "No ratings yet" ve "Be the first to review" durumları eklendi. İstanbul tamamı: OSM 15.030 + Overture 72.670 → 80.431 mekan birleştirildi ve Supabase'e yüklendi (toplam 87.665 gerçek mekan). Dev sunucusunda uçtan uca doğrulandı (Bakü).
+
+- **2026-09-12 (gece)** — Ali'nin Azerice test cümlesi (yıl dönümü + tatlı + Azerbaycan mutfağı + kabinet + orta bütçe) incelendi. Kök neden: canlı sitede DeepSeek hiç çalışmıyor, Vercel'de anahtar tanımlı değil (`query_logs.parser` hep `rules`; tarayıcıdan doğrulandı). Genel çözüm: kapsama raporu (anlaşılan ama verisi olmayan istekler puanlanmaz, kullanıcıya söylenir), çok mutfaklı istekte ana mutfak ağırlığı, "uzak (arabayla ~X dk)" ifadesi, LLM düşüş nedeni telemetrisi ve "basic understanding mode" notu, dil algılamada İngilizce cümlelerdeki Türkçe özel isimlerin ("Kadıköy") yanlış tetiklemesi düzeltildi. LLM istemine "eşleyemediğini yaklaştırma, `unmapped`'e yaz" kuralı eklendi (kabinet ≠ indoor). Test seti: kurallar 25/25, DeepSeek 24/25 (değişmedi).
+
+## NEREDE KALDIK (2026-09-12, gece)
+
+**Önce Vercel'e `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` eklenmeli** — bu yapılmadan canlı sitedeki hiçbir test DeepSeek'i ölçmüyor. Sonra aşağıdaki durum geçerli:
 
 ## NEREDE KALDIK (2026-09-12, akşam)
 

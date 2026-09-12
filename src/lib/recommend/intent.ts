@@ -178,6 +178,9 @@ export const ParsedIntentSchema = z.object({
   raw: z.string(),
   /** 0..1 – how confident the parser is that it understood the sentence. */
   confidence: z.number().min(0).max(1),
+  /** Set when the LLM was wanted but the rules had to answer instead
+   * ("llm_not_configured", a timeout, an HTTP error…). Logged, never shown raw. */
+  fallback_reason: z.string().optional(),
 });
 export type ParsedIntent = z.infer<typeof ParsedIntentSchema>;
 

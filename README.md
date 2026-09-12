@@ -63,8 +63,9 @@ Adaptive Personalization: Continuous scoring adjustments based on user acceptanc
 ## 1. Yapılanlar
 
 - **Gerçek mekan verisi.** İstanbul'un tamamı (80.431) ve Bakü'nün tamamı (7.234) Supabase/PostGIS'te. Kaynak: OpenStreetMap + Overture Maps (açık veri). Sahte mekan yok; her kayıt kaynağına bağlı (`venue_sources`).
-- **Cümleyi anlama.** DeepSeek serbest metni yapılandırılmış niyete çevirir; DeepSeek yoksa kural tabanlı Türkçe/İngilizce çözümleyici devreye girer. Mutfak sözlüğü açık: "<x> mutfağı" kalıbı ve serbest anahtarlarla Özbek, Gürcü, Lübnan gibi listede olmayan mutfaklar da çalışır. 25 cümlelik test seti: kurallar 25/25, DeepSeek 24/25.
+- **Cümleyi anlama.** DeepSeek serbest metni yapılandırılmış niyete çevirir; DeepSeek yoksa kural tabanlı Türkçe/İngilizce çözümleyici devreye girer ve arayüz "basic understanding mode" notu gösterir (LLM'in neden devreye girmediği `query_logs.parser_error`'a yazılır). Mutfak sözlüğü açık: "<x> mutfağı" kalıbı ve serbest anahtarlarla Özbek, Gürcü, Lübnan gibi listede olmayan mutfaklar da çalışır. 25 cümlelik test seti: kurallar 25/25, DeepSeek 24/25.
 - **Sıralama.** Deterministik puanlama: mutfak (zorunluluk), ortam, bütçe, mesafe, amaç, hava, kalite, ihtiyaçlar. LLM mekan seçmez. Açıklamalar puan bileşenlerinden üretilir ve kanıta göre ifade değişir ("uygun görünüyor" = tahmin, "iyi" = insan verisi). İstenen mutfak bulunamazsa arayüz bunu söyler.
+- **Kapsama raporu (dürüstlük katmanı).** Motor her aramada isteğin hangi parçalarını gerçek veriyle kontrol edebildiğini (`coverage.applied`) ve hangilerini edemediğini (`coverage.unverifiable`) döndürür: LLM'in eşleyemediği istekler ("kabinet", "tatlıları güzel olsun"), aday havuzunda hiçbir mekanda bulunmayan ortam etiketleri, verisi olmayan ihtiyaçlar (helal, tekerlekli sandalye…). Bunlar puanlamaya sokulmaz (yoksa her sonuç "ortama uymuyor" diye cezalanırdı) ve sonuç kartının üstünde "Not in our data yet, so not checked: …" satırıyla kullanıcıya söylenir. Birden fazla mutfak istenirse ilk yazılan ana mutfaktır; kısmi eşleşme "Azerbaycan mutfağı var (tatlı bilgisi yok)" diye açıklanır. Konum paylaşılmış ve tüm sonuçlar 1 saatten uzak yürümedeyse "uzak (arabayla ~25 dk)" ifadesi ve ayrı bir not çıkar.
 - **Coğrafi gerçekler.** Kıyıya uzaklık (`seaside`), Open-Meteo canlı hava, kullanıcı konumu (izin verilirse; yoksa şehir merkezi).
 - **Ortam etiketleri.** Kategori ipuçları + DeepSeek toplu etiketleme (şehir merkezlerinde 3 km; ~10.000 mekan). "Mekan değil" kayıtları kapatıldı.
 - **Yorum zekâsı katmanı (Nihat).** Tripadvisor Content API ile eşleştirme, yorumların DeepSeek ile yapılandırılmış kanıta dönüşmesi (`venue_intelligence`), sıralamaya kontrollü ek sinyal; `VENUE_INTELLIGENCE_ENABLED` ile açılıp kapanır. Pilot doğrulandı (Nergiz), tam çalıştırma yorum kaynağı kararına bağlı.
@@ -73,6 +74,7 @@ Adaptive Personalization: Continuous scoring adjustments based on user acceptanc
 
 ## 2. Kalanlar (sırayla)
 
+0. **Vercel'de LLM anahtarı yok (acil, 5 dakika).** Canlı sitede her cümle kural çözümleyicisiyle okunuyor (`query_logs.parser = rules`, 2026-09-12 doğrulandı) — DeepSeek yalnızca yerel `.env`'de tanımlı. Vercel → Project → Settings → Environment Variables'a `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` (Production + Preview) ekleyip yeniden deploy edin. Doğrulama: sitede bir arama yapın, kartın üstünde "Basic understanding mode" notu çıkmamalı; `query_logs.parser` `llm` olmalı. Aynı ekranda `VENUE_INTELLIGENCE_ENABLED`, `TRIPADVISOR_API_KEY` gibi diğer sunucu anahtarları da kontrol edilmeli.
 1. **Yorum verisi kaynağı kararı** — Tripadvisor resmi API tek başına mı, API + sınırlı scraper mı. Anahtar `.env` → `TRIPADVISOR_API_KEY`; betik hazır: `scripts/enrich/tripadvisor.mjs`, profil üretimi `scripts/enrich/profile-llm.mjs`.
 2. **Profil üretimini tüm eşleşen mekanlara yaymak** ve sıralamada "yorumlara göre …" cümlelerini görmek; 30 cümlelik sıralama testi (Ali puanlar).
 3. **Kalan ~77.000 mekanın ortam etiketlemesi** (~3,5 $ DeepSeek; onay bekliyor).
@@ -81,7 +83,7 @@ Adaptive Personalization: Continuous scoring adjustments based on user acceptanc
 6. **Harita ve rota** (Etap 3): MapLibre + OpenFreeMap, OpenRouteService.
 7. **Hesap ve History** (Etap 4): Supabase Auth, kaydedilenler, ziyaretler, kullanıcı puanları.
 8. **Bakü şehir kartı için fotoğraf**; Londra/NY/Barselona/Paris kartları "Coming soon".
-9. Uzak sonuçlarda mesafeyi araç/toplu taşıma süresiyle göstermek (şu an yürüme dakikası).
+9. Uzak sonuçlarda mesafe kartını araç/toplu taşıma süresiyle göstermek (açıklama satırında "arabayla ~X dk" tahmini var; kart hâlâ yürüme dakikası). Azerice cümleler için ayrı açıklama dili (şu an Türkçe şablonlar kullanılıyor). Semt/ilçe adlarını ("Kadıköy'e yakın") konum kısıtına çevirmek — bugün "not checked" listesine düşüyor.
 
 ## 3. Gelecek (yatırım sonrası)
 
