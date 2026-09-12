@@ -25,6 +25,11 @@ export type Candidate = {
   /** where the estimate came from – "band" means a rough guess from the price band */
   price_estimate_source?: "band" | "source" | "user" | null;
   ambiance_tags: string[];
+  /** where the ambiance tags came from: 'inferred' (LLM guess from name/category),
+   * 'source' (open data), 'user' / 'reviewed' (people) – wording depends on it */
+  ambiance_source?: string | null;
+  /** open-data type, e.g. "uzbek_restaurant" */
+  raw_type?: string | null;
   outdoor_seating: boolean | null;
   indoor_seating: boolean | null;
   wifi: string | null;
@@ -96,21 +101,26 @@ const PURPOSE_TO_GOOD_FOR: Record<Purpose, string[]> = {
   business: ["business"],
 };
 
-/** Cuisine aliases: intent key → values that may appear in OSM/Overture data. */
+/**
+ * Cuisine aliases: intent key → data values that GENUINELY mean the same thing.
+ * Deliberately no generic words ("regional", "local", "turkish" for kebab…):
+ * a Black Sea restaurant tagged "regional" must never be described as serving
+ * Azerbaijani food. Unknown keys fall back to the key itself + name keywords.
+ */
 const CUISINE_ALIASES: Record<string, string[]> = {
-  kebab: ["kebab", "kebap", "turkish", "ocakbasi", "doner", "durum", "grill"],
-  home_cooking: ["home_cooking", "turkish", "regional", "local", "lokanta", "esnaf"],
-  turkish: ["turkish", "regional", "kebab", "meyhane", "local"],
-  meyhane: ["meyhane", "turkish", "meze"],
+  kebab: ["kebab", "kebap", "ocakbasi", "doner", "durum", "grill"],
+  home_cooking: ["home_cooking", "lokanta", "esnaf"],
+  turkish: ["turkish", "kebab", "meyhane", "lokanta"],
+  meyhane: ["meyhane", "meze"],
   seafood: ["seafood", "fish", "fish_and_chips"],
-  steak: ["steak_house", "steak", "grill", "barbecue"],
-  burger: ["burger", "american", "fast_food"],
-  pizza: ["pizza", "italian"],
-  italian: ["italian", "pasta"], // a pizza chain is not what "Italian" means
-  sushi: ["sushi", "japanese"],
+  steak: ["steak_house", "steak", "barbecue"],
+  burger: ["burger", "fast_food"],
+  pizza: ["pizza"],
+  italian: ["italian", "pasta"],
+  sushi: ["sushi"],
   japanese: ["japanese", "sushi", "ramen"],
   chinese: ["chinese"],
-  asian: ["asian", "thai", "korean", "vietnamese", "chinese", "japanese"],
+  asian: ["asian", "thai", "korean", "vietnamese", "chinese", "japanese", "uzbek"],
   indian: ["indian"],
   mexican: ["mexican"],
   breakfast: ["breakfast", "brunch"],
@@ -120,7 +130,7 @@ const CUISINE_ALIASES: Record<string, string[]> = {
   bakery: ["bakery", "pastry", "borek"],
   vegetarian: ["vegetarian", "vegan"],
   vegan: ["vegan"],
-  azerbaijani: ["azerbaijani", "regional", "local", "national"],
+  azerbaijani: ["azerbaijani"],
   georgian: ["georgian"],
   international: ["international"],
 };
@@ -154,23 +164,51 @@ function t(locale: "tr" | "en", tr: string, en: string): string {
   return locale === "tr" ? tr : en;
 }
 
+/** "özbek" matches "Özbek Sofrası" and "Özbekler"; "pilav" must not match "pilavcısı"'s
+ * cousins by accident, so a keyword has to start a word in the name. */
+function wordInName(name: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}])${escaped}`, "iu").test(name);
+}
+
 function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
   if (intent.cuisines.length === 0) return { score: null };
-  if (c.cuisines.length === 0) {
-    return { score: 0.35 }; // unknown – don't punish hard, real data is sparse
-  }
   const have = c.cuisines.map((x) => x.toLowerCase());
-  // Exact key first ("home_cooking" venue for a home_cooking request), then
-  // aliases ("turkish" also satisfies kebab) – so the explanation names the
-  // cuisine the venue actually has.
+  const rawType = (c.raw_type ?? "").toLowerCase();
+  const name = c.name.toLowerCase();
+
+  // 1. Data says so: exact key, then genuine aliases, then the open-data type
+  //    itself ("uzbek_restaurant" satisfies "uzbek").
   const exact = intent.cuisines.find((want) => have.includes(want));
-  const want =
+  const aliased =
     exact ?? intent.cuisines.find((w) => have.some((h) => (CUISINE_ALIASES[w] ?? [w]).includes(h)));
-  if (want) {
+  const byType =
+    aliased ?? intent.cuisines.find((w) => rawType === w || rawType.startsWith(`${w}_`));
+  if (byType) {
     return {
       score: 1,
-      reason: t(locale, `${labelCuisine(want, "tr")} var`, `serves ${labelCuisine(want, "en")}`),
+      reason: t(
+        locale,
+        `${labelCuisine(byType, "tr")} var`,
+        `serves ${labelCuisine(byType, "en")}`,
+      ),
     };
+  }
+  // 2. The venue's own name says so ("Özbek Sofrası", "Semerkand Lokantası").
+  const keyword = intent.cuisine_keywords.find((k) => k.length >= 3 && wordInName(name, k));
+  if (keyword) {
+    const key = intent.cuisines[0] ?? keyword;
+    return {
+      score: 0.95,
+      reason: t(
+        locale,
+        `${labelCuisine(key, "tr")} (adına göre)`,
+        `${labelCuisine(key, "en")} (by name)`,
+      ),
+    };
+  }
+  if (c.cuisines.length === 0) {
+    return { score: 0.35 }; // unknown – don't punish hard, real data is sparse
   }
   // Known cuisine, and it's something else. Only a hard exclude when the parse
   // itself is confident – an uncertain read of the sentence should downrank,
@@ -186,16 +224,16 @@ function labelCuisine(key: string, locale: "tr" | "en"): string {
     turkish: ["Türk mutfağı", "Turkish food"],
     meyhane: ["meyhane", "meyhane"],
     seafood: ["balık", "seafood"],
-    steak: ["et", "steak"],
+    steak: ["et/steak", "steak"],
     burger: ["burger", "burgers"],
     pizza: ["pizza", "pizza"],
-    italian: ["İtalyan", "Italian"],
+    italian: ["İtalyan mutfağı", "Italian food"],
     sushi: ["sushi", "sushi"],
-    japanese: ["Japon", "Japanese"],
-    chinese: ["Çin", "Chinese"],
-    asian: ["Asya", "Asian"],
-    indian: ["Hint", "Indian"],
-    mexican: ["Meksika", "Mexican"],
+    japanese: ["Japon mutfağı", "Japanese food"],
+    chinese: ["Çin mutfağı", "Chinese food"],
+    asian: ["Asya mutfağı", "Asian food"],
+    indian: ["Hint mutfağı", "Indian food"],
+    mexican: ["Meksika mutfağı", "Mexican food"],
     breakfast: ["kahvaltı", "breakfast"],
     coffee: ["kahve", "coffee"],
     tea: ["çay", "tea"],
@@ -204,11 +242,28 @@ function labelCuisine(key: string, locale: "tr" | "en"): string {
     vegetarian: ["vejetaryen", "vegetarian"],
     vegan: ["vegan", "vegan"],
     azerbaijani: ["Azerbaycan mutfağı", "Azerbaijani food"],
-    georgian: ["Gürcü", "Georgian"],
+    georgian: ["Gürcü mutfağı", "Georgian food"],
     international: ["dünya mutfağı", "international"],
   };
-  const pair = L[key];
-  return pair ? (locale === "tr" ? pair[0] : pair[1]) : key;
+  const extra: Record<string, [string, string]> = {
+    uzbek: ["Özbek mutfağı", "Uzbek food"],
+    lebanese: ["Lübnan mutfağı", "Lebanese food"],
+    syrian: ["Suriye mutfağı", "Syrian food"],
+    persian: ["İran mutfağı", "Persian food"],
+    russian: ["Rus mutfağı", "Russian food"],
+    korean: ["Kore mutfağı", "Korean food"],
+    thai: ["Tayland mutfağı", "Thai food"],
+    greek: ["Yunan mutfağı", "Greek food"],
+    arabic: ["Arap mutfağı", "Arabic food"],
+    french: ["Fransız mutfağı", "French food"],
+    spanish: ["İspanyol mutfağı", "Spanish food"],
+    vietnamese: ["Vietnam mutfağı", "Vietnamese food"],
+  };
+  const pair = L[key] ?? extra[key];
+  if (pair) return locale === "tr" ? pair[0] : pair[1];
+  const words = key.replace(/_/g, " ");
+  const pretty = words.charAt(0).toUpperCase() + words.slice(1);
+  return locale === "tr" ? `${pretty} mutfağı` : `${pretty} food`;
 }
 
 function scoreAmbiance(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
@@ -355,7 +410,11 @@ function scorePurpose(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
   if (c.ambiance_tags.length === 0) return { score: 0.4 };
   const have = new Set(c.ambiance_tags);
   const hits = want.filter((tag) => have.has(tag));
-  const score = hits.length === 0 ? 0.15 : Math.min(1, 0.5 + hits.length * 0.25);
+  // Tags guessed from the name/category are weaker evidence than tags people
+  // confirmed: cap the score and say "looks good for" rather than "good for".
+  const inferred = c.ambiance_source == null || c.ambiance_source === "inferred";
+  const raw = hits.length === 0 ? 0.15 : Math.min(1, 0.5 + hits.length * 0.25);
+  const score = inferred ? Math.min(raw, 0.8) : raw;
   const purposeLabel: Record<Purpose, [string, string]> = {
     date: ["randevu için", "for a date"],
     friends: ["arkadaş buluşması için", "for meeting friends"],
@@ -365,7 +424,12 @@ function scorePurpose(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
     business: ["iş görüşmesi için", "for business"],
   };
   const pl = locale === "tr" ? purposeLabel[intent.purpose][0] : purposeLabel[intent.purpose][1];
-  const reason = score >= 0.75 ? t(locale, `${pl} iyi`, `good ${pl}`) : undefined;
+  const reason =
+    score >= 0.75
+      ? inferred
+        ? t(locale, `${pl} uygun görünüyor`, `looks good ${pl}`)
+        : t(locale, `${pl} iyi`, `good ${pl}`)
+      : undefined;
   return { score, ...(reason ? { reason } : {}) };
 }
 
@@ -478,9 +542,15 @@ const CAUTION_LABEL: Record<string, [string, string]> = {
   loud: ["gürültülü olabiliyor", "can be loud"],
   crowded: ["kalabalık olabiliyor", "can be crowded"],
   slow_service: ["servis yavaş kalabiliyor", "service can be slow"],
-  expensive_for_value: ["fiyatına göre beklentiyi karşılamayabiliyor", "may not feel worth the price"],
+  expensive_for_value: [
+    "fiyatına göre beklentiyi karşılamayabiliyor",
+    "may not feel worth the price",
+  ],
   touristy: ["oldukça turistik", "quite touristy"],
-  inconsistent_food: ["yemek kalitesi değişkenlik gösterebiliyor", "food quality can be inconsistent"],
+  inconsistent_food: [
+    "yemek kalitesi değişkenlik gösterebiliyor",
+    "food quality can be inconsistent",
+  ],
   inconsistent_service: ["servis değişkenlik gösterebiliyor", "service can be inconsistent"],
 };
 // Exported so the named-venue path (engine.ts) can use the exact same
@@ -507,11 +577,18 @@ export function labelCaution(key: string, locale: "tr" | "en"): string {
  *      missing data or zero matching evidence returns null (neutral), it
  *      never scores 0.
  */
-function scoreVenueIntelligence(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+function scoreVenueIntelligence(
+  intent: Intent,
+  c: Candidate,
+  locale: "tr" | "en",
+): ComponentResult {
   if (process.env["VENUE_INTELLIGENCE_ENABLED"] !== "true") return { score: null };
   const vi = c.intelligence;
   const purposeGoodFor = intent.purpose ? (PURPOSE_TO_GOOD_FOR[intent.purpose] ?? []) : [];
-  const asked = intent.review_priorities.length > 0 || intent.review_avoid.length > 0 || purposeGoodFor.length > 0;
+  const asked =
+    intent.review_priorities.length > 0 ||
+    intent.review_avoid.length > 0 ||
+    purposeGoodFor.length > 0;
   if (!vi || !asked) return { score: null };
 
   // Additive, confidence-scaled deviation from neutral (0.5) – NOT a plain
@@ -571,7 +648,11 @@ function scoreVenueIntelligence(intent: Intent, c: Candidate, locale: "tr" | "en
   }
   if (goodForHits.length) {
     sentences.push(
-      t(locale, `${goodForHits.join(" ve ")} için uygun görünüyor`, `seems well suited for ${goodForHits.join(" and ")}`),
+      t(
+        locale,
+        `${goodForHits.join(" ve ")} için uygun görünüyor`,
+        `seems well suited for ${goodForHits.join(" and ")}`,
+      ),
     );
   }
   if (concerns.length) {

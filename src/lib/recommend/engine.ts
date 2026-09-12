@@ -77,6 +77,7 @@ export type VenueRow = {
   confidence: number | null;
   district: string | null;
   seaside: boolean | null;
+  raw_type?: string | null;
 };
 
 export type Recommendation = {
@@ -114,27 +115,28 @@ export function serviceClient(): SupabaseClient {
 
 const DEFAULT_CATEGORIES = ["Cafés", "Restaurants", "Bars"];
 
-/** Data-side cuisine values that satisfy an intent cuisine (mirrors the scorer's aliases). */
+/** Data-side cuisine values that satisfy an intent cuisine (mirrors the scorer's
+ * strict aliases – no generic "regional"/"local" words). Unknown keys map to themselves. */
 const CUISINE_POOL_ALIASES: Record<string, string[]> = {
-  kebab: ["kebab", "kebap", "turkish", "ocakbasi", "doner", "durum", "grill"],
-  home_cooking: ["home_cooking", "turkish", "regional", "local", "lokanta", "esnaf"],
-  turkish: ["turkish", "regional", "kebab", "meyhane", "local"],
-  meyhane: ["meyhane", "turkish", "meze"],
+  kebab: ["kebab", "kebap", "ocakbasi", "doner", "durum", "grill"],
+  home_cooking: ["home_cooking", "lokanta", "esnaf"],
+  turkish: ["turkish", "kebab", "meyhane", "lokanta"],
+  meyhane: ["meyhane", "meze"],
   seafood: ["seafood", "fish", "fish_and_chips"],
-  steak: ["steak_house", "steak", "grill", "barbecue"],
-  burger: ["burger", "american", "fast_food"],
-  pizza: ["pizza", "italian"],
+  steak: ["steak_house", "steak", "barbecue"],
+  burger: ["burger", "fast_food"],
+  pizza: ["pizza"],
   italian: ["italian", "pasta"],
-  sushi: ["sushi", "japanese"],
+  sushi: ["sushi"],
   japanese: ["japanese", "sushi", "ramen"],
-  asian: ["asian", "thai", "korean", "vietnamese", "chinese", "japanese"],
+  asian: ["asian", "thai", "korean", "vietnamese", "chinese", "japanese", "uzbek"],
   breakfast: ["breakfast", "brunch"],
   coffee: ["coffee_shop", "coffee", "cafe"],
   tea: ["tea", "cay"],
   dessert: ["dessert", "cake", "ice_cream", "pastry", "waffle", "kunefe", "baklava"],
   bakery: ["bakery", "pastry", "borek"],
   vegetarian: ["vegetarian", "vegan"],
-  azerbaijani: ["azerbaijani", "regional", "local", "national"],
+  azerbaijani: ["azerbaijani"],
 };
 
 /** Search radius from what the user said about distance / transport. */
@@ -182,6 +184,8 @@ function toCandidate(v: VenueRow, intelligence?: VenueIntelligence | null): Cand
     rating_avg: v.rating_avg,
     rating_count: v.rating_count ?? 0,
     confidence: v.confidence,
+    ambiance_source: v.ambiance_source,
+    raw_type: v.raw_type ?? null,
     open_now: null, // opening_hours parsing lands in Etap 1
     intelligence: intelligence ?? null,
   };
@@ -218,7 +222,9 @@ async function loadIntelligenceMap(
       try {
         const { data, error } = await supabase
           .from("venue_intelligence")
-          .select("venue_id,version,summary,review_count,overall_confidence,good_for,aspects,cautions")
+          .select(
+            "venue_id,version,summary,review_count,overall_confidence,good_for,aspects,cautions",
+          )
           .in("venue_id", chunk);
         if (error) throw new Error(error.message);
         for (const row of (data ?? []) as Array<{ venue_id: string }>) {
@@ -419,7 +425,9 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
           usedIntelligence = true;
         }
         if (usedIntelligence && vi.overall_confidence < 0.4) {
-          pros.push(locale === "tr" ? "yorum verisi henüz sınırlı" : "based on limited review data so far");
+          pros.push(
+            locale === "tr" ? "yorum verisi henüz sınırlı" : "based on limited review data so far",
+          );
         }
       }
 
@@ -428,9 +436,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         if (tags.has("romantic") || tags.has("quiet") || tags.has("cozy")) {
           pros.push(locale === "tr" ? "romantik/sakin bir yer" : "a romantic/quiet spot");
         } else {
-          cons.push(
-            locale === "tr" ? "romantik olarak etiketli değil" : "not tagged as romantic",
-          );
+          cons.push(locale === "tr" ? "romantik olarak etiketli değil" : "not tagged as romantic");
         }
       }
       if (!pros.length && !cons.length) {
@@ -442,9 +448,10 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
         distance_min,
         pros,
         cons,
-        explanation: [...pros, ...cons.map((c) => (locale === "tr" ? `ama ${c}` : `but ${c}`))].join(
-          " · ",
-        ),
+        explanation: [
+          ...pros,
+          ...cons.map((c) => (locale === "tr" ? `ama ${c}` : `but ${c}`)),
+        ].join(" · "),
         components: {},
       };
       return {
@@ -473,7 +480,10 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   const intent: Intent = { ...parsed.intent, confidence: parsed.confidence };
 
   // 2. Real candidates near the user (PostGIS, server-side hard filters).
-  const rpc = async (radius: number, extra: { tags?: string[]; cuisines?: string[] } = {}) => {
+  const rpc = async (
+    radius: number,
+    extra: { tags?: string[]; cuisines?: string[]; nameKeywords?: string[] } = {},
+  ) => {
     const { data, error } = await supabase.rpc("venues_nearby", {
       p_lat: origin.lat,
       p_lon: origin.lon,
@@ -489,6 +499,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       p_limit: 600,
       p_tags: extra.tags ?? null,
       p_cuisines: extra.cuisines ?? null,
+      p_name_keywords: extra.nameKeywords ?? null,
     });
     if (error) throw new Error(`venues_nearby: ${error.message}`);
     return (data ?? []) as VenueRow[];
@@ -498,11 +509,15 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   // of the pool by sheer density around the origin.
   const wantedTags = [...intent.ambiance.all_of, ...intent.ambiance.any_of.flat()];
   const cuisineAliases = intent.cuisines.flatMap((c) => CUISINE_POOL_ALIASES[c] ?? [c]);
+  const nameKeywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
   const fetchNearby = async (radius: number) => {
     const sets = await Promise.all([
       rpc(radius),
       wantedTags.length ? rpc(radius, { tags: wantedTags }) : Promise.resolve([]),
       cuisineAliases.length ? rpc(radius, { cuisines: cuisineAliases }) : Promise.resolve([]),
+      // Venues the open data typed as a generic restaurant but whose NAME says
+      // what they serve ("Özbek Sofrası") – found by keyword, city-wide radius.
+      nameKeywords.length ? rpc(Math.max(radius, 25000), { nameKeywords }) : Promise.resolve([]),
     ]);
     const byId = new Map<string, VenueRow>();
     for (const set of sets) for (const row of set) byId.set(row.id, row);
@@ -511,7 +526,10 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   const ctx = { user_lat: origin.lat, user_lon: origin.lon, weather, locale };
   const baseRadius = radiusMeters(intent);
   let rows = await fetchNearby(baseRadius);
-  let intelMap = await loadIntelligenceMap(supabase, rows.map((r) => r.id));
+  let intelMap = await loadIntelligenceMap(
+    supabase,
+    rows.map((r) => r.id),
+  );
 
   // 3. Deterministic ranking + template explanations.
   const candidatesBeforeFilters = rows.length;
@@ -536,7 +554,10 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     const strong = ranked.filter((s) => (s.components.cuisine ?? 0) >= 1).length;
     if (strong < 5) {
       rows = await fetchNearby(baseRadius * 3);
-      intelMap = await loadIntelligenceMap(supabase, rows.map((r) => r.id));
+      intelMap = await loadIntelligenceMap(
+        supabase,
+        rows.map((r) => r.id),
+      );
       ranked = rankCandidates(
         intent,
         rows.map((r) => toCandidate(r, intelMap.get(r.id))),
@@ -556,7 +577,11 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       category_explicit: false,
       confidence: Math.min(intent.confidence, 0.3),
     };
-    ranked = rankCandidates(relaxed, rows.map((r) => toCandidate(r)), ctx);
+    ranked = rankCandidates(
+      relaxed,
+      rows.map((r) => toCandidate(r)),
+      ctx,
+    );
     if (ranked.length) fallbackUsed = "relaxed_filters";
   }
   if (ranked.length === 0) {
@@ -566,10 +591,18 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       const widerRows = await fetchNearby(widerRadius);
       if (widerRows.length > rows.length) {
         rows = widerRows;
-        ranked = rankCandidates(intent, rows.map((r) => toCandidate(r)), ctx);
+        ranked = rankCandidates(
+          intent,
+          rows.map((r) => toCandidate(r)),
+          ctx,
+        );
         if (ranked.length === 0) {
           const relaxed: Intent = { ...intent, category_explicit: false, confidence: 0 };
-          ranked = rankCandidates(relaxed, rows.map((r) => toCandidate(r)), ctx);
+          ranked = rankCandidates(
+            relaxed,
+            rows.map((r) => toCandidate(r)),
+            ctx,
+          );
         }
         if (ranked.length) fallbackUsed = fallbackUsed ?? "wider_radius";
       }
@@ -591,14 +624,49 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     if (broadRows.length) {
       rows = broadRows;
       const relaxed: Intent = { ...intent, category_explicit: false, confidence: 0 };
-      ranked = rankCandidates(relaxed, rows.map((r) => toCandidate(r)), ctx);
+      ranked = rankCandidates(
+        relaxed,
+        rows.map((r) => toCandidate(r)),
+        ctx,
+      );
       if (ranked.length) fallbackUsed = "broader_category";
     }
   }
   if (ranked.length === 0 && rows.length > 0) {
     // 4. Never return zero if any venue exists nearby — rank on distance/quality only.
-    ranked = rankCandidates(emptyIntent(), rows.map((r) => toCandidate(r)), ctx);
+    ranked = rankCandidates(
+      emptyIntent(),
+      rows.map((r) => toCandidate(r)),
+      ctx,
+    );
     fallbackUsed = "distance_quality_only";
+  }
+
+  // A named cuisine is a requirement, not a preference: when places that
+  // clearly serve it exist, a closer place that doesn't must not outrank them.
+  if (intent.cuisines.length) {
+    const serving = ranked.filter((s) => (s.components.cuisine ?? 0) >= 0.9);
+    if (serving.length) ranked = serving;
+  }
+  // One entry per name: three branches of the same chain are one answer, not three.
+  {
+    const seenNames = new Set<string>();
+    ranked = ranked.filter((s) => {
+      const key = s.candidate.name.trim().toLowerCase().replace(/\s+/g, " ");
+      if (seenNames.has(key)) return false;
+      seenNames.add(key);
+      return true;
+    });
+  }
+  // Honesty check: if a cuisine was asked for and none of the venues we are
+  // about to show actually serves it, say so instead of pretending.
+  const shown = ranked.slice(0, input.limit ?? 10);
+  if (
+    intent.cuisines.length &&
+    shown.length &&
+    !shown.some((s) => (s.components.cuisine ?? 0) >= 0.9)
+  ) {
+    fallbackUsed = fallbackUsed ?? "no_cuisine_match";
   }
 
   const byId = new Map(rows.map((r) => [r.id, r]));

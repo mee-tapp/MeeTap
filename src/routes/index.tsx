@@ -21,6 +21,7 @@ import { VenueCard } from "@/components/venue-card";
 import { VenuePlaceholder } from "@/components/venue-placeholder";
 import { istanbulHero, venueMirth, venueNola, venueKronotrop } from "@/lib/site-data";
 import { useCity } from "@/lib/city-context";
+import { useUserPosition } from "@/hooks/use-user-position";
 import {
   CURRENCY_SYMBOL,
   fetchFeatured,
@@ -65,25 +66,6 @@ const pinPositions = [
 
 type RecommendResponse = Awaited<ReturnType<typeof recommendVenues>>;
 
-/** Ask once for the user's position; fall back to the city centre on deny/timeout. */
-function getPosition(timeoutMs = 3500): Promise<{ lat: number; lon: number } | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
-    const timer = setTimeout(() => resolve(null), timeoutMs);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        clearTimeout(timer);
-        resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-      },
-      () => {
-        clearTimeout(timer);
-        resolve(null);
-      },
-      { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 5 * 60 * 1000 },
-    );
-  });
-}
-
 function Index() {
   const { city } = useCity();
   const [query, setQuery] = useState("");
@@ -94,6 +76,7 @@ function Index() {
     );
   const [heroPhase, setHeroPhase] = useState<"idle" | "searching" | "done">("idle");
   const [result, setResult] = useState<RecommendResponse | null>(null);
+  const userPosition = useUserPosition();
 
   // Real featured venues for the selected city (photo-less until photos exist).
   const featuredQuery = useQuery({
@@ -114,7 +97,8 @@ function Index() {
     setHeroPhase("searching");
     try {
       // Keep the scanning animation visible for at least a beat.
-      const position = await getPosition();
+      // Waits for the permission prompt if it is still open; null when denied.
+      const position = await userPosition.request();
       const [response] = await Promise.all([
         recommendVenues({
           data: {
@@ -188,6 +172,9 @@ function Index() {
                 setHeroPhase("idle");
               }}
               className="min-w-0 flex-1 bg-transparent px-4 text-sm outline-none placeholder:text-muted-foreground"
+              onFocus={() => {
+                if (userPosition.status === "idle") void userPosition.request();
+              }}
               placeholder="What do you feel like doing today?"
               aria-label="Describe what you want to do"
             />
@@ -229,6 +216,9 @@ function Index() {
 
           {heroPhase === "done" && foundVenue && (
             <div className="mt-4 max-w-xl animate-in fade-in slide-in-from-bottom-2 rounded-lg border border-border bg-card/70 p-4 duration-500">
+              {result?.notice && (
+                <p className="mb-3 text-xs text-muted-foreground">{result.notice}</p>
+              )}
               <div className="space-y-3">
                 {foundVenues.map((venue, index) => (
                   <div key={venue.slug} className="flex items-center gap-3">
@@ -286,8 +276,8 @@ function Index() {
                 />
                 <Context
                   icon={Wallet}
-                  value={`${currencySymbol} ${foundVenue.budget}`}
-                  sub="Budget (est.)"
+                  value={foundVenue.priceLevel ? currencySymbol.repeat(foundVenue.priceLevel) : "—"}
+                  sub={foundVenue.priceLevel ? "Price level (est.)" : "Price unknown"}
                 />
                 <Context
                   icon={Footprints}

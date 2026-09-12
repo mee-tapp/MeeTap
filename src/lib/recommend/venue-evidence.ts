@@ -49,8 +49,7 @@ export const VenueEvidenceInputSchema = z.object({
 export type VenueEvidenceInput = z.infer<typeof VenueEvidenceInputSchema>;
 
 export type VenueEvidenceValidation =
-  | { ok: true; data: VenueEvidenceInput }
-  | { ok: false; errors: string[] };
+  { ok: true; data: VenueEvidenceInput } | { ok: false; errors: string[] };
 
 export function validateVenueEvidenceInput(json: unknown): VenueEvidenceValidation {
   const parsed = VenueEvidenceInputSchema.safeParse(json);
@@ -89,14 +88,11 @@ export function fromVenueReviewsExternalRow(row: {
 
 /** A raw Terra `/locations/{id}/reviews` entry (see scripts/enrich/terra-reviews-nergiz.mjs) –
  * used before anything is written to venue_reviews_external. */
-export function fromTerraReviewJson(
-  raw: Record<string, unknown>,
-): ExternalReviewEvidence {
+export function fromTerraReviewJson(raw: Record<string, unknown>): ExternalReviewEvidence {
   const primaryEntry = (value: unknown): { value?: string; language?: string } | undefined => {
     if (Array.isArray(value) && value.length) {
       return (value.find((v) => v && (v as { primary?: boolean }).primary) ?? value[0]) as
-        | { value?: string; language?: string }
-        | undefined;
+        { value?: string; language?: string } | undefined;
     }
     return undefined;
   };
@@ -105,7 +101,9 @@ export function fromTerraReviewJson(
     return primaryEntry(value)?.value ?? null;
   };
   const user = raw["user"] as { username?: string } | undefined;
-  const subratingsRaw = Array.isArray(raw["subratings"]) ? (raw["subratings"] as Array<Record<string, unknown>>) : [];
+  const subratingsRaw = Array.isArray(raw["subratings"])
+    ? (raw["subratings"] as Array<Record<string, unknown>>)
+    : [];
   return {
     source: "tripadvisor",
     external_review_id: String(raw["id"] ?? ""),

@@ -28,6 +28,7 @@ import { CountUp } from "@/components/count-up";
 import { Reveal } from "@/components/reveal";
 import { categories, cities, purposes } from "@/lib/site-data";
 import { useCity } from "@/lib/city-context";
+import { useUserPosition } from "@/hooks/use-user-position";
 import { fetchStats, fetchVenues } from "@/lib/venues/server";
 
 const MAX_BUDGET = 20000;
@@ -88,8 +89,9 @@ function Explore() {
     return () => clearTimeout(timer);
   }, [query]);
 
+  const { position } = useUserPosition();
   const venuesQuery = useQuery({
-    queryKey: ["venues", city, category, mood, budget, distance, debouncedQuery],
+    queryKey: ["venues", city, category, mood, budget, distance, debouncedQuery, position],
     queryFn: () =>
       fetchVenues({
         data: {
@@ -99,6 +101,8 @@ function Explore() {
           query: debouncedQuery,
           maxBudget: budget < MAX_BUDGET ? budget : null,
           maxDistanceMin: distance < MAX_DISTANCE ? distance : null,
+          lat: position?.lat ?? null,
+          lon: position?.lon ?? null,
         },
       }),
     placeholderData: (previous) => previous,

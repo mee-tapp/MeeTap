@@ -81,10 +81,45 @@ export type Need = (typeof NEEDS)[number];
 
 const ambianceTag = z.enum(AMBIANCE_TAGS);
 
+/** "Home cooking" / "home-cooking" / "HOME_COOKING" → "home_cooking". */
+export function normalizeCuisineKey(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(
+      /[çğıöşüâîû]/g,
+      (ch) =>
+        ({ ç: "c", ğ: "g", ı: "i", ö: "o", ş: "s", ü: "u", â: "a", î: "i", û: "u" })[ch] ?? ch,
+    )
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 export const IntentSchema = z.object({
   purpose: z.enum(PURPOSES).nullable().default(null),
   categories: z.array(z.enum(CATEGORIES)).default([]),
-  cuisines: z.array(z.enum(CUISINES)).default([]),
+  /**
+   * Open vocabulary: any cuisine as a lowercase snake_case English key
+   * ("kebab", "uzbek", "georgian"). Known keys get rich aliases; unknown keys
+   * are matched against venue data + venue names via `cuisine_keywords`, so a
+   * cuisine nobody listed in code still works.
+   */
+  cuisines: z
+    .array(z.string().min(2).max(40))
+    .default([])
+    .transform((arr) => [...new Set(arr.map(normalizeCuisineKey).filter(Boolean))]),
+  /**
+   * Words that would appear in the NAME of a venue serving those cuisines,
+   * in any language/script the city uses ("uzbek" → ["uzbek","özbek","semerkand"]).
+   * Used to find venues the open data typed as a generic restaurant.
+   */
+  cuisine_keywords: z
+    .preprocess(
+      // Models like to answer {"uzbek": ["özbek", …]} – flatten to one list.
+      (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.values(v).flat() : v),
+      z.array(z.string().min(2).max(40)).default([]),
+    )
+    .transform((arr) => [...new Set(arr.map((k) => k.trim().toLowerCase()).filter(Boolean))]),
   ambiance: z
     .object({
       /** Every tag here should be present. */

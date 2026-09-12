@@ -23,7 +23,10 @@
   },
   {
     "q": "I want seaside place quiete and i haw low budget",
-    "expect": { "ambiance_all": ["seaside", "quiet"], "budget_level": "low" }
+    "expect": {
+      "ambiance_all": ["seaside", "quiet"],
+      "budget_level": "low"
+    }
   },
   {
     "q": "Bu akşam 4 kişi manzaralı bir yerde 40 manat civarı balık yiyelim",
@@ -73,23 +76,41 @@
   },
   {
     "q": "Öğle arası hızlı ve ucuz bir şeyler yemek istiyorum, yakın olsun",
-    "expect": { "budget_level": "low", "max_distance_max": 20 }
+    "expect": {
+      "budget_level": "low",
+      "max_distance_max": 20
+    }
   },
   {
     "q": "İş görüşmesi için sessiz, şık bir restoran, fiyat önemli değil",
-    "expect": { "purpose": "business", "ambiance_all": ["quiet"], "budget_level": "high" }
+    "expect": {
+      "purpose": "business",
+      "ambiance_all": ["quiet"],
+      "budget_level": "high"
+    }
   },
   {
     "q": "Gece geç saatte açık, canlı müzikli bir bar",
-    "expect": { "categories": ["Bars"], "ambiance_all": ["late_night", "live_music"] }
+    "expect": {
+      "categories": ["Bars"],
+      "ambiance_all": ["late_night", "live_music"]
+    }
   },
   {
     "q": "Vegan seçenekleri olan, bahçeli bir kafe",
-    "expect": { "categories": ["Cafés"], "ambiance_all": ["outdoor"], "needs_any": ["vegan"] }
+    "expect": {
+      "categories": ["Cafés"],
+      "ambiance_all": ["outdoor"],
+      "needs_any": ["vegan"]
+    }
   },
   {
     "q": "Sushi craving, mid-range, walking distance from Taksim",
-    "expect": { "cuisines_any": ["sushi"], "budget_level": "mid", "transport": "walking" }
+    "expect": {
+      "cuisines_any": ["sushi"],
+      "budget_level": "mid",
+      "transport": "walking"
+    }
   },
   {
     "q": "Çocuklarla gidebileceğimiz bir aktivite, kapalı alan olsun çünkü soğuk",
@@ -102,15 +123,25 @@
   },
   {
     "q": "Hesaplı bir yerde burger",
-    "expect": { "cuisines_any": ["burger"], "budget_level": "low" }
+    "expect": {
+      "cuisines_any": ["burger"],
+      "budget_level": "low"
+    }
   },
   {
     "q": "Sahilde yürüyüş sonrası çay içecek bir yer",
-    "expect": { "ambiance_all": ["seaside"], "cuisines_any": ["tea"] }
+    "expect": {
+      "ambiance_all": ["seaside"],
+      "cuisines_any": ["tea"]
+    }
   },
   {
     "q": "quiet cafe with wifi to work for a few hours",
-    "expect": { "purpose": "study", "ambiance_all": ["quiet"], "needs": ["wifi"] }
+    "expect": {
+      "purpose": "study",
+      "ambiance_all": ["quiet"],
+      "needs": ["wifi"]
+    }
   },
   {
     "q": "Kız arkadaşımla yıldönümü, romantik ve manzaralı, bütçem kişi başı 1500 tl",
@@ -131,10 +162,43 @@
   },
   {
     "q": "Kalabalık olmayan, sıcak bir yerde tatlı ve kahve",
-    "expect": { "avoid": ["lively"], "cuisines_any": ["dessert", "coffee"] }
+    "expect": {
+      "avoid": ["lively"],
+      "cuisines_any": ["dessert", "coffee"]
+    }
   },
   {
     "q": "I want coffee shop",
-    "expect": { "categories": ["Cafés"], "cuisines_any": ["coffee"] }
+    "expect": {
+      "categories": ["Cafés"],
+      "cuisines_any": ["coffee"]
+    }
+  },
+  {
+    "q": "uzbek mutfagi istiyorum tek gidecegim",
+    "expect": {
+      "cuisines_any": ["uzbek"],
+      "purpose": "alone"
+    }
+  },
+  {
+    "q": "azerbaycan mutfagi iyi olan bi restoran istiyorum ve sevgilimle gidecegim",
+    "expect": {
+      "cuisines_any": ["azerbaijani"],
+      "purpose": "date"
+    }
+  },
+  {
+    "q": "Gürcü restoranı, hinkali yiyelim",
+    "expect": {
+      "cuisines_any": ["georgian"]
+    }
+  },
+  {
+    "q": "sushi restorani istiyorum ailemle gidecegim",
+    "expect": {
+      "cuisines_any": ["sushi"],
+      "purpose": "family"
+    }
   }
 ]

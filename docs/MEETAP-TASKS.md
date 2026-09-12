@@ -106,7 +106,18 @@ Kurallar:
 - **2026-09-12** — "Deniz kenarı" artık coğrafi gerçek: Overture su poligonlarından kıyı çizgisi çıkarıldı, her mekanın kıyıya uzaklığı hesaplandı (İstanbul 6.316, Bakü 211 mekan ≤150 m). Niyet sözlüğüne `seaside` eklendi. Ana sayfa kartı 3 sonuç gösteriyor. Kategori söylenmezse varsayılan kafe/restoran/bar. Kural çözümleyici için 20 cümlelik değerlendirme seti eklendi.
 - **2026-09-11 (geç gece)** — Arayüz gerçek veriye bağlandı (ana sayfa arama + öne çıkanlar, keşfet, detay + yorum). Tasarım dosyalarına dokunulmadı; sadece veri kaynağı değişti, fotoğraf yerine kategori ikonu, "No ratings yet" ve "Be the first to review" durumları eklendi. İstanbul tamamı: OSM 15.030 + Overture 72.670 → 80.431 mekan birleştirildi ve Supabase'e yüklendi (toplam 87.665 gerçek mekan). Dev sunucusunda uçtan uca doğrulandı (Bakü).
 
-## NEREDE KALDIK (2026-09-12)
+## NEREDE KALDIK (2026-09-12, akşam)
+
+Nihat'ın "venue intelligence" katmanı (yorum → DeepSeek → yapılandırılmış kanıt, feature flag `VENUE_INTELLIGENCE_ENABLED`) korunarak üzerine Ali'nin test şikayetleri düzeltildi:
+
+- **Mutfak sözlüğü artık açık.** "Özbek", "Gürcü", "Lübnan"… kodda listeli olmasa da çalışır: cümledeki "<x> mutfağı/restoranı" kalıbı anahtar olur, DeepSeek de serbest anahtar üretir. Eşleşme üç yoldan: veri (cuisines / raw_type), veya mekanın ADI (sadece demonimler: "Özbek Sofrası"). Genel kelimeler ("regional", "local", "pilav", "Buhara") artık eşleşme sayılmaz — Hayvore'nin "Azerbaycan mutfağı var" diye çıkması bu yüzden bitti.
+- **Belirtilen mutfak zorunluluk:** o mutfağı verdiği belli mekanlar varsa sadece onlar gösterilir; yoksa kartta "yakında bulunamadı, en yakın alternatifler" notu çıkar.
+- **Kanıta göre ifade:** etiket LLM tahminiyse "aile için uygun görünüyor", insan verisiyse "aile için iyi".
+- **Konum:** izin penceresi açıkken 3,5 sn zaman aşımı yüzünden hep şehir merkezi kullanılıyordu; artık arama kutusuna odaklanınca izin istenir, cevap beklenir, keşfet sayfası da konumu kullanır.
+- **Fiyat:** uydurma rakam yerine seviye ("₺₺₺ · Price level (est.)"), bilinmiyorsa "Price unknown".
+- Aynı isimli şubeler tek sonuç sayılır. Test seti 25 cümle: kurallar 25/25, DeepSeek 24/25.
+
+Açık karar hâlâ yorum verisi kaynağı (Tripadvisor API + sınırlı scraper önerisi).
 
 Durduk. Açık karar: yorum verisi için Tripadvisor yolu (bkz. README → Geliştirici Rehberi → bölüm 2). Öneri: resmi API + sınırlı scraper. Anahtar `.env`'e girince `scripts/enrich/tripadvisor.mjs` ile başlanır, sonra DeepSeek profil üretimi, sonra sıralamanın profilleri kullanması, sonra 30 cümlelik sıralama testi.
 

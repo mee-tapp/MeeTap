@@ -34,6 +34,9 @@ export type Venue = {
   ratingBreakdown: number[];
   reviewList: Review[];
   currency?: string;
+  /** 1 cheap … 4 expensive; null when unknown */
+  priceLevel?: number | null;
+  priceSource?: "estimated" | "reported" | "unknown";
   website?: string | null;
   lat?: number;
   lon?: number;

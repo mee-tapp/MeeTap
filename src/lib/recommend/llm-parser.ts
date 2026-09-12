@@ -59,7 +59,8 @@ Return ONLY a JSON object with exactly these keys:
 {
   "purpose": one of ${JSON.stringify(PURPOSES)} or null,
   "categories": array from ${JSON.stringify(CATEGORIES)} (empty = any),
-  "cuisines": array from ${JSON.stringify(CUISINES)},
+  "cuisines": array of cuisine keys in lowercase snake_case English – prefer these known keys when they fit: ${JSON.stringify(CUISINES)}; ANY other cuisine is allowed as its own key ("uzbek", "georgian", "lebanese", "persian", "korean", "russian"…). Never drop a cuisine because it is not in the list.
+  "cuisine_keywords": for each cuisine, words that would appear in the NAME of such a venue in this city, in Turkish, English, Azerbaijani and the cuisine's own transliteration (e.g. "uzbek" → ["uzbek","özbek","ozbek","özbekistan","semerkand","buhara","taşkent","pilav"]; "georgian" → ["georgian","gürcü","gurcu","hinkali","khachapuri","haçapuri"]; "azerbaijani" → ["azerbaijani","azerbaycan","azərbaycan","azeri","baku","bakü"]). Only demonyms, country/region/city names and transliterations – NEVER dish names (no "pilav", "kebap", "mantı", "pizza"): a dish word would match every Turkish pilav shop. Empty for very generic cuisines like "coffee".
   "ambiance": {
     "all_of": array from the ambiance list – tags the user requires,
     "any_of": array of arrays – alternatives joined by "veya / ya da / or", e.g. [["quiet","live_music"]],
@@ -87,6 +88,50 @@ Rules:
 - "sahil / deniz kenarı / seaside / by the sea / waterfront / Boğaz kenarı" → "seaside" (a location fact: the place is at the shore). "manzara / view" → "view". Both may apply.
 - "yakın / yürüme mesafesi" → transport "walking", max_distance_min 15–20.
 - Never invent constraints the user did not state. Prefer null / empty over guessing.`;
+
+/** Dish words that appear in thousands of venue names – useless as cuisine keywords. */
+const GENERIC_DISH_WORDS = new Set([
+  "pilav",
+  "plov",
+  "pilaf",
+  "kebap",
+  "kebab",
+  "döner",
+  "doner",
+  "pide",
+  "lahmacun",
+  "çorba",
+  "corba",
+  "mantı",
+  "manti",
+  "köfte",
+  "kofte",
+  "börek",
+  "borek",
+  "pizza",
+  "burger",
+  "çay",
+  "cay",
+  "kahve",
+  "coffee",
+  "cafe",
+  "kafe",
+  "restoran",
+  "restaurant",
+  "lokanta",
+  "sofra",
+  "sofrası",
+  "mutfak",
+  "mutfağı",
+  "ev",
+  "yemek",
+  "food",
+  "kitchen",
+  "grill",
+  "ocakbaşı",
+  "ocakbasi",
+  "tea",
+]);
 
 export type LlmParseResult = ParsedIntent & { latency_ms?: number; model?: string };
 
@@ -147,6 +192,14 @@ export async function parseIntentWithLlm(
       intent.group_size = rules.intent.group_size;
     if (rules.intent.budget.level != null && intent.budget.level == null)
       intent.budget = { ...intent.budget, level: rules.intent.budget.level };
+    // Name keywords: the curated dictionary wins when it knows the cuisine; the
+    // model's list is only used for cuisines we have no dictionary entry for,
+    // and never with generic dish words that would match half the city.
+    if (rules.intent.cuisine_keywords.length) {
+      intent.cuisine_keywords = rules.intent.cuisine_keywords;
+    } else {
+      intent.cuisine_keywords = intent.cuisine_keywords.filter((k) => !GENERIC_DISH_WORDS.has(k));
+    }
 
     return {
       intent,

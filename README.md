@@ -58,11 +58,12 @@ Adaptive Personalization: Continuous scoring adjustments based on user acceptanc
 
 # Geliştirici Rehberi (Türkçe) — Nerede kaldık, nasıl devam edilir
 
-> Bu bölüm 12 Eylül 2026 itibarıyla projenin gerçek durumunu anlatır. Yukarıdaki İngilizce metin ürün vizyonudur; aşağıdaki teknik gerçektir.
+> Bu bölüm 12 Eylül 2026 (akşam) itibarıyla projenin gerçek durumunu anlatır. Güncel "nerede kaldık" için `docs/MEETAP-TASKS.md` başındaki bölüme bakın. Yukarıdaki İngilizce metin ürün vizyonudur; aşağıdaki teknik gerçektir.
 
 ## 1. Şu an çalışan şeyler
 
 - **Gerçek mekan verisi:** İstanbul'un tamamı (80.431) ve Bakü'nün tamamı (7.234) Supabase'de. Kaynaklar: OpenStreetMap + Overture Maps (ikisi de açık veri, ücretsiz). Sahte mekan yok.
+- **Mutfak sözlüğü açık:** "<x> mutfağı" kalıbı ve DeepSeek serbest anahtar üretir; eşleşme veri + mekan adı (demonim) ile. Belirtilen mutfak zorunluluktur.
 - **Doğal dil → niyet:** Kullanıcının cümlesini DeepSeek yapılandırılmış JSON'a çevirir (`src/lib/recommend/llm-parser.ts`); DeepSeek yoksa/çökerse kural tabanlı Türkçe/İngilizce çözümleyici devreye girer (`rule-parser.ts`). 20 cümlelik test setinde kurallar 20/20, DeepSeek 19/20 (`node scripts/eval/intent-eval.mjs`).
 - **Sıralama:** Deterministik, ağırlıklı puanlama (`scoring.ts`): mutfak, ortam etiketleri, bütçe, mesafe, amaç, hava, kalite. LLM mekan seçmez; sadece cümleyi anlar. Açıklamalar puan bileşenlerinden şablonla üretilir ("serves seafood · fits your budget (estimated) · 9 min walk").
 - **Coğrafi gerçekler:** Her mekanın kıyıya uzaklığı hesaplı (`seaside`), hava durumu Open-Meteo'dan canlı.

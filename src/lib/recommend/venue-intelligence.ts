@@ -94,8 +94,7 @@ export const VenueIntelligenceSchema = z.object({
 export type VenueIntelligence = z.infer<typeof VenueIntelligenceSchema>;
 
 export type VenueIntelligenceValidation =
-  | { ok: true; data: VenueIntelligence }
-  | { ok: false; errors: string[] };
+  { ok: true; data: VenueIntelligence } | { ok: false; errors: string[] };
 
 /** Fail safely: never let a malformed LLM response through as if it were valid. */
 export function validateVenueIntelligence(json: unknown): VenueIntelligenceValidation {

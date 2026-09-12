@@ -110,7 +110,23 @@ const PURPOSE_DICT: Dict<Purpose> = [
     ],
     "study",
   ],
-  [["yalniz", "tek basima", "kendi basima", "alone", "by myself", "solo"], "alone"],
+  [
+    [
+      "yalniz",
+      "tek basima",
+      "kendi basima",
+      "tek gidecegim",
+      "tek gidiyorum",
+      "tek giderim",
+      "yalniz gidecegim",
+      "kendim gidecegim",
+      "alone",
+      "by myself",
+      "solo",
+      "on my own",
+    ],
+    "alone",
+  ],
   [
     ["ailemle", "aile", "cocuklarla", "cocukla", "cocuklu", "annemle", "babamla", "family", "kids"],
     "family",
@@ -234,28 +250,180 @@ const NEED_DICT: Dict<Need> = [
 const REVIEW_PRIORITY_DICT: Dict<AspectKey> = [
   [
     [
-      "yemekleri iyi", "yemek kalitesi", "yemekleri gercekten iyi", "yemekleri cok iyi",
-      "yemekleri harika", "lezzetli", "nefis", "guzel yemek", "yemekleri guzel",
-      "good food", "food is great", "great food", "delicious",
+      "yemekleri iyi",
+      "yemek kalitesi",
+      "yemekleri gercekten iyi",
+      "yemekleri cok iyi",
+      "yemekleri harika",
+      "lezzetli",
+      "nefis",
+      "guzel yemek",
+      "yemekleri guzel",
+      "good food",
+      "food is great",
+      "great food",
+      "delicious",
     ],
     "food_quality",
   ],
   [
-    ["servisi iyi", "servis kalitesi", "ilgili personel", "guler yuzlu", "good service", "great service"],
+    [
+      "servisi iyi",
+      "servis kalitesi",
+      "ilgili personel",
+      "guler yuzlu",
+      "good service",
+      "great service",
+    ],
     "service",
   ],
   [
-    ["paranin karsiligi", "fiyat performans", "degerinde", "uygun fiyat performans", "value for money", "worth the price"],
+    [
+      "paranin karsiligi",
+      "fiyat performans",
+      "degerinde",
+      "uygun fiyat performans",
+      "value for money",
+      "worth the price",
+    ],
     "value",
   ],
-  [["atmosferi guzel", "ortami guzel", "ambiyans", "atmosfer", "nice atmosphere", "great atmosphere"], "atmosphere"],
-  [["konusabilecegimiz", "sohbet edebilecegimiz", "rahat konusa", "sohbet", "can talk", "conversation"], "quiet"],
+  [
+    [
+      "atmosferi guzel",
+      "ortami guzel",
+      "ambiyans",
+      "atmosfer",
+      "nice atmosphere",
+      "great atmosphere",
+    ],
+    "atmosphere",
+  ],
+  [
+    [
+      "konusabilecegimiz",
+      "sohbet edebilecegimiz",
+      "rahat konusa",
+      "sohbet",
+      "can talk",
+      "conversation",
+    ],
+    "quiet",
+  ],
 ];
 
 const REVIEW_AVOID_DICT: Dict<CautionTag> = [
   [["yavas servis", "servis yavas", "slow service"], "slow_service"],
   [["turistik cok", "cok turistik", "too touristy"], "touristy"],
 ];
+
+// Words that precede "mutfağı/restoranı" without naming a cuisine.
+const GENERIC_CUISINE_STOP = new Set([
+  "bir",
+  "iyi",
+  "guzel",
+  "bu",
+  "sakin",
+  "ucuz",
+  "pahali",
+  "romantik",
+  "sik",
+  "the",
+  "a",
+  "an",
+  "good",
+  "nice",
+  "quiet",
+  "cheap",
+  "any",
+  "some",
+  "yakin",
+  "olan",
+  "acik",
+  "dunya",
+  "ev",
+]);
+/** Turkish/English cuisine words → canonical key (only where the key differs from the word). */
+const CUISINE_WORD_MAP: Record<string, string> = {
+  ozbek: "uzbek",
+  ozbekistan: "uzbek",
+  uzbek: "uzbek",
+  gurcu: "georgian",
+  gurcistan: "georgian",
+  georgian: "georgian",
+  azerbaycan: "azerbaijani",
+  azeri: "azerbaijani",
+  azerbaijani: "azerbaijani",
+  turk: "turkish",
+  turkish: "turkish",
+  italyan: "italian",
+  italian: "italian",
+  japon: "japanese",
+  cin: "chinese",
+  chinese: "chinese",
+  hint: "indian",
+  indian: "indian",
+  meksika: "mexican",
+  mexican: "mexican",
+  kore: "korean",
+  korean: "korean",
+  lubnan: "lebanese",
+  lebanese: "lebanese",
+  suriye: "syrian",
+  syrian: "syrian",
+  iran: "persian",
+  fars: "persian",
+  persian: "persian",
+  rus: "russian",
+  russian: "russian",
+  fransiz: "french",
+  french: "french",
+  ispanyol: "spanish",
+  spanish: "spanish",
+  yunan: "greek",
+  greek: "greek",
+  arap: "arabic",
+  arabic: "arabic",
+  tay: "thai",
+  thai: "thai",
+  vietnam: "vietnamese",
+  vietnamese: "vietnamese",
+  deniz: "seafood",
+  balik: "seafood",
+  kebap: "kebab",
+  kebab: "kebab",
+  hamburger: "burger",
+  burger: "burger",
+};
+/** Name keywords per canonical key (any language/script used in Istanbul & Baku). */
+/**
+ * Name keywords per canonical key – DEMONYMS ONLY. City names ("Buhara",
+ * "Semerkand", "Halep") are popular names for ordinary Turkish kebab houses and
+ * would mislabel them, so they are deliberately left out.
+ */
+const CUISINE_KEYWORDS: Record<string, string[]> = {
+  uzbek: ["uzbek", "özbek", "ozbek", "özbekistan", "uzbekistan"],
+  georgian: ["georgian", "gürcü", "gurcu", "gürcistan"],
+  azerbaijani: ["azerbaijani", "azerbaycan", "azərbaycan", "azeri"],
+  lebanese: ["lebanese", "lübnan"],
+  syrian: ["syrian", "suriye"],
+  persian: ["persian", "iran", "iranian", "fars"],
+  russian: ["russian", "rus"],
+  korean: ["korean", "kore"],
+  thai: ["thai", "tayland"],
+  greek: ["greek", "yunan"],
+  arabic: ["arabic", "arap", "arab"],
+  indian: ["indian", "hint", "hindistan"],
+  mexican: ["mexican", "meksika"],
+  japanese: ["japanese", "japon"],
+  sushi: ["sushi", "suşi"],
+  chinese: ["chinese", "çin"],
+  italian: ["italian", "italyan", "pizzeria", "trattoria", "osteria"],
+  french: ["french", "fransız"],
+  seafood: ["balık", "balik", "seafood", "fish"],
+  meyhane: ["meyhane"],
+  breakfast: ["kahvaltı", "kahvalti", "breakfast", "brunch"],
+};
 
 const CATEGORY_DICT: Dict<Category> = [
   [["kafe", "cafe", "kahveci", "coffee shop", "kahve icmek", "cay icmek"], "Cafés"],
@@ -426,6 +594,25 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
   intent.purpose = purposes[0] ?? null;
 
   intent.cuisines = findAll(text, CUISINE_DICT);
+  // Generic: "<x> mutfağı", "<x> restoranı", "<x> yemekleri", "<x> cuisine/food/restaurant"
+  // → the word itself becomes a cuisine key AND a name keyword, so cuisines
+  // nobody listed in code ("özbek", "gürcü", "lübnan") still work.
+  const generic = [
+    ...text.matchAll(
+      /\b([a-z]{3,20})\s+(?:mutfagi|mutfagini|restorani|restoran|yemekleri|yemegi|lokantasi|cuisine|food|restaurant|kitchen)\b/g,
+    ),
+  ]
+    .map((m) => m[1]!)
+    .filter((w) => !GENERIC_CUISINE_STOP.has(w));
+  const mappedGeneric = generic.map((w) => CUISINE_WORD_MAP[w] ?? w);
+  intent.cuisines = [...new Set([...intent.cuisines, ...mappedGeneric])];
+  intent.cuisine_keywords = [
+    ...new Set([
+      ...generic,
+      ...mappedGeneric.flatMap((k) => CUISINE_KEYWORDS[k] ?? []),
+      ...intent.cuisines.flatMap((k) => CUISINE_KEYWORDS[k] ?? []),
+    ]),
+  ];
   intent.needs = findAll(text, NEED_DICT);
   intent.categories = findAll(text, CATEGORY_DICT);
   // A cuisine request implies a restaurant unless the user said café/bar. This is

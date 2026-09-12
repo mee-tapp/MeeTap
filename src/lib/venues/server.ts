@@ -189,6 +189,8 @@ export function toVenue(
     reviews: String(count),
     time: `${minutes} min`,
     budget: estimateBudget(row.price_band, row.currency),
+    priceLevel: row.price_band ?? null,
+    priceSource: row.price_band ? "estimated" : "unknown",
     currency: row.currency ?? "TRY",
     tags: tags.length ? tags : cuisines,
     detail,
@@ -212,6 +214,9 @@ const exploreInput = z.object({
   maxBudget: z.number().nullable().default(null),
   maxDistanceMin: z.number().nullable().default(null),
   limit: z.number().int().min(1).max(200).default(60),
+  /** user position when granted – distances are measured from here instead of the city centre */
+  lat: z.number().nullable().default(null),
+  lon: z.number().nullable().default(null),
 });
 
 /** Explore page list: real venues for the selected city, filtered server-side. */
@@ -256,7 +261,8 @@ export const fetchVenues = createServerFn({ method: "GET" })
       .limit(data.maxDistanceMin != null ? 400 : Math.max(data.limit * 5, 200));
     if (error) throw new Error(error.message);
 
-    let venues = (rows as VenueRowLite[]).map((r) => toVenue(r, center));
+    const origin = data.lat != null && data.lon != null ? { lat: data.lat, lon: data.lon } : center;
+    let venues = (rows as VenueRowLite[]).map((r) => toVenue(r, origin));
     if (data.maxDistanceMin != null) {
       venues = venues.filter((v) => Number.parseInt(v.time, 10) <= data.maxDistanceMin!);
     }
@@ -442,8 +448,15 @@ export const recommendVenues = createServerFn({ method: "POST" })
         distanceMin: r.distance_min,
       }),
     );
+    const notice =
+      out.fallback_used === "no_cuisine_match"
+        ? "We couldn't find a place that clearly serves that cuisine nearby, so these are the closest matches."
+        : out.fallback_used && out.fallback_used !== "relaxed_filters"
+          ? "Few exact matches nearby, so we widened the search."
+          : null;
     return {
       results,
+      notice,
       query_log_id: out.query_log_id,
       weather: out.weather
         ? {
