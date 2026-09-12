@@ -116,22 +116,19 @@ Kurallar:
 
 ## NEREDE KALDIK (2026-09-12, gece)
 
-**Önce Vercel'e `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` eklenmeli** — bu yapılmadan canlı sitedeki hiçbir test DeepSeek'i ölçmüyor. Sonra aşağıdaki durum geçerli:
+**Önce Vercel'e `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` eklenmeli**; bu yapılmadan canlı sitedeki hiçbir test DeepSeek'i ölçmüyor (her arama `parser = rules`).
 
-## NEREDE KALDIK (2026-09-12, akşam)
+Bugün eklenen genel kurallar (ayrıntı ve neden tablosu: README → Geliştirici Rehberi → bölüm 1b):
 
-Nihat'ın "venue intelligence" katmanı (yorum → DeepSeek → yapılandırılmış kanıt, feature flag `VENUE_INTELLIGENCE_ENABLED`) korunarak üzerine Ali'nin test şikayetleri düzeltildi:
+- **Amaç, mekan tipini belirler:** bar/pub/nargile, fast food/büfe, düğün salonu randevu ve iş yemeği için aday olamaz; aile/çalışma için bar ve salon elenir. Açıkça bar istenirse bar kalır.
+- **Mesafe gösterilir, karar vermez:** ağırlık 0.4, istenen mutfak/ortam şehir genelinde aranır, uzak sonuç "uzak (arabayla ~X dk)" diye yazılır.
+- **Kapsama raporu:** verisi olmayan istekler puanlanmaz, kartta "Not in our data yet, so not checked: …" yazar.
+- **Şehrin kendi mutfağı:** Bakü'de "local/home_cooking" etiketleri Azerbaycan mutfağı kanıtı (ad/etiket çelişkisi yoksa).
+- **Konum:** 3 km'den kaba tarayıcı konumu yok sayılır; doğruluk kaydedilir ve kartta "±X km" görünür.
 
-- **Mutfak sözlüğü artık açık.** "Özbek", "Gürcü", "Lübnan"… kodda listeli olmasa da çalışır: cümledeki "<x> mutfağı/restoranı" kalıbı anahtar olur, DeepSeek de serbest anahtar üretir. Eşleşme üç yoldan: veri (cuisines / raw_type), veya mekanın ADI (sadece demonimler: "Özbek Sofrası"). Genel kelimeler ("regional", "local", "pilav", "Buhara") artık eşleşme sayılmaz — Hayvore'nin "Azerbaycan mutfağı var" diye çıkması bu yüzden bitti.
-- **Belirtilen mutfak zorunluluk:** o mutfağı verdiği belli mekanlar varsa sadece onlar gösterilir; yoksa kartta "yakında bulunamadı, en yakın alternatifler" notu çıkar.
-- **Kanıta göre ifade:** etiket LLM tahminiyse "aile için uygun görünüyor", insan verisiyse "aile için iyi".
-- **Konum:** izin penceresi açıkken 3,5 sn zaman aşımı yüzünden hep şehir merkezi kullanılıyordu; artık arama kutusuna odaklanınca izin istenir, cevap beklenir, keşfet sayfası da konumu kullanır.
-- **Fiyat:** uydurma rakam yerine seviye ("₺₺₺ · Price level (est.)"), bilinmiyorsa "Price unknown".
-- Aynı isimli şubeler tek sonuç sayılır. Test seti 25 cümle: kurallar 25/25, DeepSeek 24/25.
+Önceki günden korunanlar: açık mutfak sözlüğü, kanıta göre ifade ("uygun görünüyor" / "iyi"), konum izni bekleme, fiyat seviyesi, şube tekilleştirme, Nihat'ın venue intelligence katmanı (`VENUE_INTELLIGENCE_ENABLED`). Test seti: kurallar 25/25, DeepSeek 24/25.
 
-Açık karar hâlâ yorum verisi kaynağı (Tripadvisor API + sınırlı scraper önerisi).
-
-Durduk. Açık karar: yorum verisi için Tripadvisor yolu (bkz. README → Geliştirici Rehberi → bölüm 2). Öneri: resmi API + sınırlı scraper. Anahtar `.env`'e girince `scripts/enrich/tripadvisor.mjs` ile başlanır, sonra DeepSeek profil üretimi, sonra sıralamanın profilleri kullanması, sonra 30 cümlelik sıralama testi.
+Açık karar: yorum verisi kaynağı (Tripadvisor API + sınırlı scraper önerisi). Anahtar `.env`'e girince `scripts/enrich/tripadvisor.mjs`, sonra profil üretimi, sonra sıralamanın profilleri kullanması, sonra 30 cümlelik sıralama testi.
 
 ## Sıradaki işler (öncelik sırasıyla — README bölüm 2 ile aynı)
 
@@ -145,9 +142,9 @@ Durduk. Açık karar: yorum verisi için Tripadvisor yolu (bkz. README → Geli�
 
 ## Karar bekleyenler (Ali)
 
-| Konu                                                      | Seçenekler                    | Durum             |
-| --------------------------------------------------------- | ----------------------------- | ----------------- |
-| Pilot bölge                                               | İstanbul tamamı + Bakü tamamı | ✅ karar verildi  |
-| Supabase projesi                                          | açıldı                        | ✅                |
-| LLM anahtarı                                              | DeepSeek                      | ✅ bağlandı       |
-| Veri yokken şehir kartları (Londra, NY, Barselona, Paris) | kalsın / kaldır / "yakında"   | ⏸ sonra sorulacak |
+| Konu                                                      | Seçenekler                    | Durum                          |
+| --------------------------------------------------------- | ----------------------------- | ------------------------------ |
+| Pilot bölge                                               | İstanbul tamamı + Bakü tamamı | ✅ karar verildi               |
+| Supabase projesi                                          | açıldı                        | ✅                             |
+| LLM anahtarı                                              | DeepSeek                      | ✅ yerelde; Vercel'e girilecek |
+| Veri yokken şehir kartları (Londra, NY, Barselona, Paris) | kalsın / kaldır / "yakında"   | ⏸ sonra sorulacak              |
