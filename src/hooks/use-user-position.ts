@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type UserPosition = { lat: number; lon: number };
+export type UserPosition = { lat: number; lon: number; accuracy_m: number | null };
+
+/** A fix worse than this is an IP / ISP-level guess, not where the user is.
+ * Desktop browsers without GPS often report 5–50 km. Searching "nearby" from
+ * such a point silently moves the user across the city, so we fall back to
+ * the city centre instead (the UI then says "From city centre"). */
+const MAX_USABLE_ACCURACY_M = 3000;
 
 /**
  * Browser geolocation without the usual race: the permission prompt can take
@@ -10,9 +16,9 @@ export type UserPosition = { lat: number; lon: number };
  */
 export function useUserPosition() {
   const [position, setPosition] = useState<UserPosition | null>(null);
-  const [status, setStatus] = useState<"idle" | "asking" | "granted" | "denied" | "unavailable">(
-    "idle",
-  );
+  const [status, setStatus] = useState<
+    "idle" | "asking" | "granted" | "denied" | "unavailable" | "coarse"
+  >("idle");
   const pending = useRef<Promise<UserPosition | null> | null>(null);
 
   const request = useCallback((): Promise<UserPosition | null> => {
@@ -26,7 +32,13 @@ export function useUserPosition() {
     pending.current = new Promise<UserPosition | null>((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const next = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          const accuracy = Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null;
+          if (accuracy != null && accuracy > MAX_USABLE_ACCURACY_M) {
+            setStatus("coarse");
+            resolve(null);
+            return;
+          }
+          const next = { lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy_m: accuracy };
           setPosition(next);
           setStatus("granted");
           resolve(next);

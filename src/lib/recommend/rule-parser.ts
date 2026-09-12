@@ -401,7 +401,8 @@ const CUISINE_WORD_MAP: Record<string, string> = {
  * "Semerkand", "Halep") are popular names for ordinary Turkish kebab houses and
  * would mislabel them, so they are deliberately left out.
  */
-const CUISINE_KEYWORDS: Record<string, string[]> = {
+export const CUISINE_KEYWORDS: Record<string, string[]> = {
+  turkish: ["turkish", "türk", "turk", "anadolu", "karadeniz"],
   uzbek: ["uzbek", "özbek", "ozbek", "özbekistan", "uzbekistan"],
   georgian: ["georgian", "gürcü", "gurcu", "gürcistan"],
   azerbaijani: ["azerbaijani", "azerbaycan", "azərbaycan", "azeri"],

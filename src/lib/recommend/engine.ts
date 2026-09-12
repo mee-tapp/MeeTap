@@ -27,9 +27,12 @@ import { validateVenueIntelligence, type VenueIntelligence } from "./venue-intel
  * TanStack server function; scripts call it directly.
  */
 
-export const CITY_CENTERS: Record<string, { lat: number; lon: number; currency: string }> = {
-  Istanbul: { lat: 41.0369, lon: 28.985, currency: "TRY" },
-  Baku: { lat: 40.3777, lon: 49.852, currency: "AZN" },
+export const CITY_CENTERS: Record<
+  string,
+  { lat: number; lon: number; currency: string; cuisine?: string }
+> = {
+  Istanbul: { lat: 41.0369, lon: 28.985, currency: "TRY", cuisine: "turkish" },
+  Baku: { lat: 40.3777, lon: 49.852, currency: "AZN", cuisine: "azerbaijani" },
 };
 
 export type RecommendInput = {
@@ -615,7 +618,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   // (ambiance / seaside / cuisine), so the right places are never crowded out
   // of the pool by sheer density around the origin.
   const wantedTags = [...intent.ambiance.all_of, ...intent.ambiance.any_of.flat()];
-  const cuisineAliases = intent.cuisines.flatMap((c) => CUISINE_POOL_ALIASES[c] ?? [c]);
+  // The city's own cuisine also lives under generic "local / regional / home
+  // cooking" tags (see scoreCuisine) – pull those into the pool as well.
+  const cuisineAliases = intent.cuisines.flatMap((c) =>
+    c === center.cuisine
+      ? [...(CUISINE_POOL_ALIASES[c] ?? [c]), "local", "regional", "home_cooking", "lokanta", "esnaf"]
+      : (CUISINE_POOL_ALIASES[c] ?? [c]),
+  );
   const nameKeywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
   const fetchNearby = async (radius: number) => {
     const sets = await Promise.all([
@@ -630,7 +639,13 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     for (const set of sets) for (const row of set) byId.set(row.id, row);
     return [...byId.values()];
   };
-  const ctx = { user_lat: origin.lat, user_lon: origin.lon, weather, locale };
+  const ctx = {
+    user_lat: origin.lat,
+    user_lon: origin.lon,
+    weather,
+    locale,
+    city_cuisine: center.cuisine ?? null,
+  };
   const baseRadius = radiusMeters(intent);
   let rows = await fetchNearby(baseRadius);
   let intelMap = await loadIntelligenceMap(

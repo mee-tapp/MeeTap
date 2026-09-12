@@ -1,4 +1,5 @@
 import type { AmbianceTag, Category, Intent, Purpose } from "./intent.ts";
+import { CUISINE_KEYWORDS } from "./rule-parser.ts";
 import type { VenueIntelligence } from "./venue-intelligence.ts";
 
 /**
@@ -57,7 +58,27 @@ export type ScoringContext = {
   weather: Weather | null;
   now?: Date;
   locale?: "tr" | "en";
+  /** The city's own cuisine ("azerbaijani" in Baku, "turkish" in Istanbul).
+   * There, generic "local / regional / home cooking" tags are evidence for it;
+   * anywhere else they are not (a Black Sea lokanta is not Azerbaijani). */
+  city_cuisine?: string | null;
 };
+
+/** Open-data tags that mean "the local kitchen" without naming it. */
+const LOCAL_GENERIC_TAGS = ["local", "regional", "home_cooking", "lokanta", "esnaf"];
+
+/** Generic-tagged venue whose tags or NAME still name another kitchen
+ * ("Kavkasioni – Gürcü Mətbəxi" with home_cooking, "Anadolu Restaurant" with
+ * regional/kebab/turkish in Baku) is not the local cuisine. */
+function contradictsLocal(cityCuisine: string, have: string[], name: string): boolean {
+  const own = new Set([cityCuisine, ...(CUISINE_ALIASES[cityCuisine] ?? []), ...LOCAL_GENERIC_TAGS]);
+  if (have.some((h) => !own.has(h))) return true;
+  for (const [key, words] of Object.entries(CUISINE_KEYWORDS)) {
+    if (key === cityCuisine) continue;
+    if (words.some((w) => wordInName(name, w))) return true;
+  }
+  return false;
+}
 
 // --- weights (single source of truth; tune here) ------------------------------
 
@@ -173,7 +194,12 @@ function wordInName(name: string, keyword: string): boolean {
   return new RegExp(`(^|[^\\p{L}])${escaped}`, "iu").test(name);
 }
 
-function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+function scoreCuisine(
+  intent: Intent,
+  c: Candidate,
+  locale: "tr" | "en",
+  cityCuisine: string | null = null,
+): ComponentResult {
   if (intent.cuisines.length === 0) return { score: null };
   const have = c.cuisines.map((x) => x.toLowerCase());
   const rawType = (c.raw_type ?? "").toLowerCase();
@@ -188,6 +214,7 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
   // a place matching more of them ranks higher, and the explanation says
   // which part we could confirm and which we could not.
   const byData: string[] = [];
+  const byLocal: string[] = [];
   const byName: string[] = [];
   const missing: string[] = [];
   const keywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
@@ -198,6 +225,16 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
       have.some((h) => aliases.includes(h)) || rawType === want || rawType.startsWith(`${want}_`);
     if (inData) {
       byData.push(want);
+      continue;
+    }
+    // In its own city the national cuisine is what "local / regional / home
+    // cooking" means – open data rarely spells out "azerbaijani" in Baku.
+    if (
+      want === cityCuisine &&
+      have.some((h) => LOCAL_GENERIC_TAGS.includes(h)) &&
+      !contradictsLocal(cityCuisine, have, name)
+    ) {
+      byLocal.push(want);
       continue;
     }
     // Name keywords are not attributed to a specific cuisine; they describe
@@ -217,7 +254,8 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
   const totalWeight = intent.cuisines.reduce((sum, k) => sum + weight(k), 0);
   const matched =
     byData.reduce((sum, k) => sum + weight(k), 0) +
-    0.95 * byName.reduce((sum, k) => sum + weight(k), 0);
+    0.95 * byName.reduce((sum, k) => sum + weight(k), 0) +
+    0.75 * byLocal.reduce((sum, k) => sum + weight(k), 0);
   if (matched === 0) {
     if (c.cuisines.length === 0) {
       return { score: 0.35 }; // unknown – don't punish hard, real data is sparse
@@ -237,6 +275,8 @@ function scoreCuisine(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
   if (byData.length) parts.push(t(locale, `${labels(byData)} var`, `serves ${labels(byData)}`));
   if (byName.length)
     parts.push(t(locale, `${labels(byName)} (adına göre)`, `${labels(byName)} (by name)`));
+  if (byLocal.length)
+    parts.push(t(locale, "yerel mutfak", "local cuisine"));
   let reason = parts.join(", ");
   if (missing.length)
     reason += t(locale, ` (${labels(missing)} bilgisi yok)`, ` (no ${labels(missing)} info)`);
@@ -743,7 +783,7 @@ export function scoreCandidate(
 
   const dist = scoreDistance(intent, c, ctx, locale);
   const results: Record<ComponentKey, ComponentResult> = {
-    cuisine: scoreCuisine(intent, c, locale),
+    cuisine: scoreCuisine(intent, c, locale, ctx.city_cuisine ?? null),
     ambiance: scoreAmbiance(intent, c, locale),
     budget: scoreBudget(intent, c, locale),
     distance: dist,
