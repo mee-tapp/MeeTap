@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   ArrowRight,
   Building2,
@@ -29,7 +30,10 @@ import { Reveal } from "@/components/reveal";
 import { categories, cities, purposes } from "@/lib/site-data";
 import { useCity } from "@/lib/city-context";
 import { useUserPosition } from "@/hooks/use-user-position";
+import { useAuth } from "@/lib/auth/auth-context";
 import { fetchStats, fetchVenues } from "@/lib/venues/server";
+import { fetchSavedVenues, toggleSavedVenue } from "@/lib/venues/account-server";
+import type { Venue } from "@/lib/site-data";
 
 const MAX_BUDGET = 20000;
 const MAX_DISTANCE = 120;
@@ -70,6 +74,26 @@ function Explore() {
   const [distance, setDistance] = useState(MAX_DISTANCE);
   const [saved, setSaved] = useState<string[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const { user, session } = useAuth();
+  const accessToken = session?.access_token ?? "";
+  const queryClient = useQueryClient();
+
+  // Seed saved state from the server once, for a signed-in user.
+  const savedVenuesQuery = useQuery({
+    queryKey: ["my-saved-slugs", accessToken],
+    queryFn: () => fetchSavedVenues({ data: { accessToken } }),
+    enabled: Boolean(accessToken),
+  });
+  useEffect(() => {
+    if (savedVenuesQuery.data) setSaved(savedVenuesQuery.data.venues.map((v) => v.slug));
+  }, [savedVenuesQuery.data]);
+
+  const toggleSaveMutation = useMutation({
+    mutationFn: (input: { venueId: string; save: boolean }) =>
+      toggleSavedVenue({ data: { accessToken, venueId: input.venueId, save: input.save } }),
+    onError: () => toast.error("Could not update saved places."),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["my-saved-slugs", accessToken] }),
+  });
 
   const activeFilterCount =
     (mood ? 1 : 0) +
@@ -77,10 +101,19 @@ function Explore() {
     (budget < MAX_BUDGET ? 1 : 0) +
     (distance < MAX_DISTANCE ? 1 : 0);
 
-  const toggleSaved = (name: string) =>
+  const toggleSaved = (venue: Venue) => {
+    const nowSaved = !saved.includes(venue.slug);
     setSaved((items) =>
-      items.includes(name) ? items.filter((item) => item !== name) : [...items, name],
+      nowSaved ? [...items, venue.slug] : items.filter((item) => item !== venue.slug),
     );
+    if (user && venue.id) {
+      toggleSaveMutation.mutate({ venueId: venue.id, save: nowSaved });
+    } else if (!user) {
+      toast("Sign in to keep your saved places.", {
+        action: { label: "Sign in", onClick: () => (window.location.href = "/auth") },
+      });
+    }
+  };
 
   // Real venues for this city, filtered on the server (typing is debounced).
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -308,7 +341,7 @@ function Explore() {
                   <VenueCard
                     venue={venue}
                     saved={saved.includes(venue.slug)}
-                    onSave={() => toggleSaved(venue.slug)}
+                    onSave={() => toggleSaved(venue)}
                   />
                 </CarouselItem>
               ))}
@@ -344,7 +377,7 @@ function Explore() {
                   key={venue.slug}
                   venue={venue}
                   saved={saved.includes(venue.slug)}
-                  onSave={() => toggleSaved(venue.slug)}
+                  onSave={() => toggleSaved(venue)}
                 />
               ))}
             </div>

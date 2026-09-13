@@ -1,11 +1,15 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Heart, MapPin, Star } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { VenuePlaceholder } from "@/components/venue-placeholder";
 import type { Review } from "@/lib/site-data";
 import { fetchVenue, submitReview as submitReviewFn } from "@/lib/venues/server";
+import { fetchSavedVenues, toggleSavedVenue } from "@/lib/venues/account-server";
+import { useAuth } from "@/lib/auth/auth-context";
 
 export const Route = createFileRoute("/explore/$slug")({
   loader: async ({ params }) => {
@@ -13,6 +17,11 @@ export const Route = createFileRoute("/explore/$slug")({
     if (!venue) throw notFound();
     return venue;
   },
+  // Without this, the root layout's page-fade unmounts the previous page the
+  // instant the URL changes, and this route's async loader leaves nothing to
+  // show for a moment — a blank flash before the venue page appears.
+  pendingComponent: VenueDetailPending,
+  pendingMs: 0,
   head: ({ loaderData }) => ({
     meta: loaderData
       ? [
@@ -27,6 +36,29 @@ export const Route = createFileRoute("/explore/$slug")({
   component: VenueDetail,
 });
 
+function VenueDetailPending() {
+  return (
+    <main className="text-foreground">
+      <section className="site-shell pb-6 pt-8">
+        <Button variant="glass" size="sm" className="rounded-full" asChild>
+          <Link to="/explore">
+            <ArrowLeft className="size-3.5" /> Back to explore
+          </Link>
+        </Button>
+      </section>
+      <section className="site-shell grid gap-10 pb-16 lg:grid-cols-[1.1fr_.9fr] lg:items-center">
+        <Skeleton className="aspect-[16/10] w-full rounded-xl" />
+        <div>
+          <Skeleton className="h-10 w-3/4" />
+          <Skeleton className="mt-4 h-5 w-1/2" />
+          <Skeleton className="mt-5 h-4 w-full max-w-md" />
+          <Skeleton className="mt-2 h-4 w-2/3 max-w-md" />
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function initials(name: string) {
   return name
     .split(" ")
@@ -38,6 +70,8 @@ function initials(name: string) {
 
 function VenueDetail() {
   const venue = Route.useLoaderData();
+  const { user, session, profile } = useAuth();
+  const accessToken = session?.access_token ?? "";
   const [saved, setSaved] = useState(false);
   const [reviews, setReviews] = useState<Review[]>(venue.reviewList);
   const [summary, setSummary] = useState({
@@ -53,13 +87,41 @@ function VenueDetail() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Reflect the real saved state once, for a signed-in user.
+  useEffect(() => {
+    if (!accessToken) return;
+    fetchSavedVenues({ data: { accessToken } }).then((result) => {
+      if (venue.id && result.venues.some((v) => v.id === venue.id)) setSaved(true);
+    });
+  }, [accessToken, venue.id]);
+
+  const toggleSave = () => {
+    const nowSaved = !saved;
+    setSaved(nowSaved);
+    if (user && venue.id) {
+      toggleSavedVenue({ data: { accessToken, venueId: venue.id, save: nowSaved } }).catch(() =>
+        toast.error("Could not update saved places."),
+      );
+    } else if (!user) {
+      toast("Sign in to keep your saved places.", {
+        action: { label: "Sign in", onClick: () => (window.location.href = "/auth") },
+      });
+    }
+  };
+
   const submitReview = async () => {
     if (!userRating || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const saved = await submitReviewFn({
-        data: { slug: venue.slug, rating: userRating, comment, name: authorName },
+        data: {
+          slug: venue.slug,
+          rating: userRating,
+          comment,
+          name: authorName || profile?.display_name || "",
+          accessToken: accessToken || null,
+        },
       });
       setReviews(saved.reviewList);
       setSummary({
@@ -112,7 +174,7 @@ function VenueDetail() {
             variant="glass"
             className="absolute right-4 top-4 rounded-full"
             aria-label={saved ? `Unsave ${venue.name}` : `Save ${venue.name}`}
-            onClick={() => setSaved((value) => !value)}
+            onClick={toggleSave}
           >
             <Heart className={saved ? "fill-current" : ""} />
           </Button>

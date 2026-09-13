@@ -15,6 +15,8 @@ import appCss from "../styles.css?url";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { CityProvider } from "@/lib/city-context";
+import { AuthProvider } from "@/lib/auth/auth-context";
+import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -136,14 +138,17 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <CityProvider>
-        <SiteHeader />
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-        <div key={pathname} className="animate-in fade-in duration-300">
-          <Outlet />
-        </div>
-        <SiteFooter />
-      </CityProvider>
+      <AuthProvider>
+        <CityProvider>
+          <SiteHeader />
+          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+          <div key={pathname} className="animate-in fade-in duration-300">
+            <Outlet />
+          </div>
+          <SiteFooter />
+          <Toaster position="top-center" />
+        </CityProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

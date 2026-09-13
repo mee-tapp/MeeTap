@@ -384,21 +384,27 @@ export const submitReview = createServerFn({ method: "POST" })
         rating: z.number().int().min(1).max(5),
         comment: z.string().max(1000).default(""),
         name: z.string().max(60).default(""),
+        /** Signed-in user's access token, so the review shows up in "My Reviews". */
+        accessToken: z.string().nullable().default(null),
       })
       .parse(input),
   )
   .handler(async ({ data }) => {
     const { serviceClient } = await import("@/lib/recommend/engine");
+    const { verifyAccessToken } = await import("@/lib/auth/server-auth");
     const sb = serviceClient();
+    const user = await verifyAccessToken(data.accessToken);
     const { data: venue } = await sb
       .from("venues")
       .select("id")
       .eq("slug", data.slug)
       .maybeSingle();
     if (!venue) throw new Error("venue not found");
+    const fallbackName = (user?.user_metadata?.["display_name"] as string | undefined) ?? "Guest";
     const { error } = await sb.from("reviews").insert({
       venue_id: venue.id,
-      author_name: data.name.trim() || "Guest",
+      user_id: user?.id ?? null,
+      author_name: data.name.trim() || fallbackName,
       rating: data.rating,
       comment: data.comment.trim() || null,
     });
@@ -434,6 +440,8 @@ export const recommendVenues = createServerFn({ method: "POST" })
         limit: z.number().int().min(1).max(20).default(6),
         /** "rules" skips the LLM – used by the How-it-works demo. */
         parser: z.enum(["auto", "rules"]).default("auto"),
+        /** Signed-in user id, so this search appears in their History later. */
+        userId: z.string().uuid().nullable().default(null),
       })
       .parse(input),
   )
