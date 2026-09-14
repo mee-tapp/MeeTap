@@ -37,17 +37,58 @@ const TARGET = {
   quick_bites: Number(args.quick ?? 20),
 };
 const MIN_REVIEWS = {
-  restaurant: Number(args["min-restaurant"] ?? 120),
-  cafe_coffee: 50,
-  bar_pub: 50,
-  dessert_bakery: 50,
-  tea_house: 40,
-  lounge_hookah: 50,
-  quick_bites: 80,
+  restaurant: Number(args["min-restaurant"] ?? 80),
+  cafe_coffee: 30,
+  bar_pub: 30,
+  dessert_bakery: 30,
+  tea_house: 25,
+  lounge_hookah: 30,
+  quick_bites: 50,
 };
+/** Not a place to go out to: hotels, halls, shops, sights. Category names, lowercase. */
+const EXCLUDE_TYPES = [
+  "hotel",
+  "lodging",
+  "hostel",
+  "banquet",
+  "wedding",
+  "event venue",
+  "supermarket",
+  "grocery",
+  "market",
+  "gas station",
+  "park",
+  "museum",
+  "tourist attraction",
+  "shopping mall",
+  "store",
+  "night club",
+];
+const KEEP_SHOP_TYPES = [
+  "cake shop",
+  "pastry shop",
+  "coffee shop",
+  "ice cream shop",
+  "chocolate shop",
+  "dessert shop",
+  "tea store",
+];
+function isVenue(row) {
+  const types = row.types.map((t) => String(t).toLowerCase());
+  if (types.some((t) => KEEP_SHOP_TYPES.includes(t))) return true;
+  return !types.some((t) => EXCLUDE_TYPES.some((x) => t.includes(x)));
+}
 const MIN_RATING = Number(args["min-rating"] ?? 4.0);
 /** "Worth the trip" areas outside the centre get a guaranteed quota. */
-const OUTSIDE_AREAS = ["Bilgah", "Bilgəh", "Mardakan", "Mərdəkan", "Novxanı", "Novkhani", "Nardaran"];
+const OUTSIDE_AREAS = [
+  "Bilgah",
+  "Bilgəh",
+  "Mardakan",
+  "Mərdəkan",
+  "Novxanı",
+  "Novkhani",
+  "Nardaran",
+];
 const OUTSIDE_QUOTA = 15;
 
 function wordIn(name, w) {
@@ -76,11 +117,15 @@ const rows = JSON.parse(
   await readFile(`data/catalog/${city.toLowerCase()}-candidates.json`, "utf8"),
 );
 for (const r of rows) r.establishment_type = establishmentTypeOf(r);
+const venues = rows.filter(isVenue);
+console.log(
+  `${rows.length} candidates, ${rows.length - venues.length} dropped as hotels/halls/shops/sights`,
+);
 
 const picked = new Set();
 const perType = {};
 for (const [type, target] of Object.entries(TARGET)) {
-  const pool = rows
+  const pool = venues
     .filter(
       (r) =>
         r.establishment_type === type &&
@@ -92,7 +137,7 @@ for (const [type, target] of Object.entries(TARGET)) {
   for (const r of perType[type]) picked.add(r.place_id);
 }
 // Outside-the-centre quota (restaurants/cafés only), regardless of the per-type cut.
-const outside = rows
+const outside = venues
   .filter(
     (r) =>
       r.areas.some((a) => OUTSIDE_AREAS.some((o) => a.includes(o))) &&
