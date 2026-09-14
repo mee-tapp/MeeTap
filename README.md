@@ -119,7 +119,7 @@ node --env-file=.env scripts/db/apply-migrations.mjs   # idempotent, 0001–0022
 npm run dev                  # http://localhost:8080
 ```
 
-`SUPABASE_DB_URL` **session pooler** adresi olmalı (direct adres IPv6-only). Gerekli anahtarlar: Supabase (3), `LLM_PROVIDER=deepseek` + `DEEPSEEK_API_KEY`, **yedek LLM** `GROQ_API_KEY` (console.groq.com, ücretsiz, kartsız; DeepSeek yanıt vermezse sırayla denenir, 15 Eylül'de DeepSeek saatlerce cevap vermedi), veri toplama için `APIFY_TOKEN`. Vercel'de aynı anahtarlar tanımlı (Nihat, 14 Eylül). Vite yapılandırması `@lovable.dev/vite-tanstack-config` preset'iyle gelir; deploy riski yüzünden değiştirilmedi, ürünle ilgisi yok.
+`SUPABASE_DB_URL` **session pooler** adresi olmalı (direct adres IPv6-only). Gerekli anahtarlar: Supabase (3), `LLM_PROVIDER=deepseek` + `DEEPSEEK_API_KEY`, **yedek LLM** `GROQ_API_KEY` (console.groq.com, ücretsiz, kartsız; DeepSeek yanıt vermezse sırayla denenir). Not: DeepSeek V4'te `deepseek-chat` düşünen modele bağlanır; kod `thinking: disabled` gönderir, yoksa boş cevap/zaman aşımı olur, veri toplama için `APIFY_TOKEN`. Vercel'de aynı anahtarlar tanımlı (Nihat, 14 Eylül). Vite yapılandırması `@lovable.dev/vite-tanstack-config` preset'iyle gelir; deploy riski yüzünden değiştirilmedi, ürünle ilgisi yok.
 
 Yerel scraper için bir kez: `brew install go && go install github.com/gosom/google-maps-scraper@latest` (ikili `~/go/bin/`; ilk çalıştırmada Chromium indirir).
 

@@ -247,8 +247,13 @@ async function parseWithProvider(
       body: JSON.stringify({
         model: cfg.model,
         temperature: 0,
-        max_tokens: 600,
+        max_tokens: 900,
         response_format: { type: "json_object" },
+        // DeepSeek V4 (2026-09): "deepseek-chat" now aliases a thinking model
+        // that spends the whole token budget on reasoning_content and returns
+        // an empty answer (finish_reason "length") or takes 10+ s. Intent
+        // parsing needs no chain of thought – turn it off explicitly.
+        ...(cfg.name === "deepseek" ? { thinking: { type: "disabled" } } : {}),
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: raw },
@@ -258,9 +263,14 @@ async function parseWithProvider(
     });
     if (!res.ok)
       throw new Error(`${cfg.model} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const json = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+      usage?: unknown;
+    };
+    if (process.env["LLM_DEBUG"])
+      console.warn("[intent] raw:", JSON.stringify(json).slice(0, 1500));
     const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error("empty completion");
+    if (!content) throw new Error(`empty completion (finish=${json.choices?.[0]?.finish_reason})`);
 
     const parsed = IntentSchema.safeParse(JSON.parse(stripFences(content)));
     if (!parsed.success) throw new Error(`schema: ${parsed.error.issues[0]?.message}`);
