@@ -10,7 +10,11 @@
  *   node scripts/catalog/select-pilot.mjs --city Baku --restaurants 150 --cafes 50 --bars 40 --desserts 25 --tea 15 --quick 20
  */
 import { readFile, writeFile } from "node:fs/promises";
-import { GOOGLE_TYPE_MAP, NAME_HINTS } from "../../src/lib/catalog/taxonomy.ts";
+import {
+  GOOGLE_CATEGORY_NAME_MAP,
+  GOOGLE_TYPE_MAP,
+  NAME_HINTS,
+} from "../../src/lib/catalog/taxonomy.ts";
 
 const args = Object.fromEntries(
   process.argv
@@ -33,15 +37,15 @@ const TARGET = {
   quick_bites: Number(args.quick ?? 20),
 };
 const MIN_REVIEWS = {
-  restaurant: 200,
-  cafe_coffee: 100,
-  bar_pub: 100,
-  dessert_bakery: 100,
-  tea_house: 60,
-  lounge_hookah: 60,
-  quick_bites: 150,
+  restaurant: Number(args["min-restaurant"] ?? 120),
+  cafe_coffee: 50,
+  bar_pub: 50,
+  dessert_bakery: 50,
+  tea_house: 40,
+  lounge_hookah: 50,
+  quick_bites: 80,
 };
-const MIN_RATING = 4.2;
+const MIN_RATING = Number(args["min-rating"] ?? 4.0);
 /** "Worth the trip" areas outside the centre get a guaranteed quota. */
 const OUTSIDE_AREAS = ["Bilgəh / Nardaran", "Mərdəkan / Şüvəlan", "Novxanı"];
 const OUTSIDE_QUOTA = 15;
@@ -56,12 +60,15 @@ export function establishmentTypeOf(row) {
   for (const hint of NAME_HINTS) {
     if (hint.type && hint.words.some((w) => wordIn(row.name, w))) return hint.type;
   }
-  const ordered = [row.primary_type, ...row.types].filter(Boolean);
+  // Candidates carry Google's human category names ("Azerbaijani restaurant")
+  // or, from the Places API path, snake_case types ("azerbaijani_restaurant").
+  const ordered = [row.primary_type, ...row.types].filter(Boolean).map((t) => t.toLowerCase());
+  const lookup = (t) => GOOGLE_CATEGORY_NAME_MAP[t] ?? GOOGLE_TYPE_MAP[t.replace(/[^a-z]+/g, "_")];
   for (const t of ordered) {
-    const m = GOOGLE_TYPE_MAP[t];
+    const m = lookup(t);
     if (m?.type) return m.type;
   }
-  if (ordered.some((t) => GOOGLE_TYPE_MAP[t]?.cuisine)) return "restaurant";
+  if (ordered.some((t) => lookup(t)?.cuisine || /restaurant/.test(t))) return "restaurant";
   return null;
 }
 
@@ -125,4 +132,4 @@ console.log(`proposed ${picked.size} venues → ${file}`);
 for (const [type, list] of Object.entries(perType))
   console.log(`  ${type.padEnd(16)} ${list.length}/${TARGET[type]}`);
 console.log(`  outside centre   ${outside.length}/${OUTSIDE_QUOTA}`);
-console.log("Edit the keep column (1 = in, blank = out), then run google-details.mjs.");
+console.log("Edit the keep column (1 = in, blank = out), then run apify-places.mjs --details.");

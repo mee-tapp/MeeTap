@@ -81,7 +81,8 @@ const AREAS = {
   Baku: {
     query: "Baku, Azerbaijan",
     // "worth the trip" places outside the centre – searched separately, small quota
-    outside: ["Bilgah, Baku", "Mardakan, Baku", "Novkhani, Azerbaijan", "Nardaran, Baku"],
+    // Names must resolve on Nominatim (the actor geocodes them): Latin spellings work.
+    outside: ["Bilgah, Azerbaijan", "Mardakan, Azerbaijan", "Novxanı, Azerbaijan", "Nardaran, Azerbaijan"],
   },
   Istanbul: { query: "Kadıköy, Istanbul", outside: [] },
 };
@@ -241,15 +242,16 @@ if (args.search) {
     process.exit(1);
   }
   const maxPer = Number(args["max-per-search"] ?? 20);
+  const onlyOutside = args["only-outside"] === true;
   const runs = [
-    {
+    ...(onlyOutside ? [] : [{
       label: "centre",
       input: {
         searchStringsArray: SEARCHES,
         locationQuery: cfg.query,
         maxCrawledPlacesPerSearch: maxPer,
       },
-    },
+    }]),
     ...cfg.outside.map((loc) => ({
       label: loc,
       input: {
@@ -277,9 +279,25 @@ if (args.search) {
     for (const r of runs) console.log(r.label, JSON.stringify({ ...common, ...r.input }));
     process.exit(0);
   }
+  // Resume-safe: start from what an earlier run already saved, and never let
+  // one failed area (a location the actor cannot geocode) lose the others.
+  await mkdir("data/catalog", { recursive: true });
+  const base = `data/catalog/${city.toLowerCase()}-candidates`;
   const byId = new Map();
+  try {
+    for (const row of JSON.parse(await readFile(`${base}.json`, "utf8"))) byId.set(row.place_id, row);
+    console.log(`resuming with ${byId.size} places from ${base}.json`);
+  } catch {
+    /* first run */
+  }
   for (const r of runs) {
-    const items = await runActor({ ...common, ...r.input }, r.label);
+    let items;
+    try {
+      items = await runActor({ ...common, ...r.input }, r.label);
+    } catch (err) {
+      console.error(`\n${r.label}: ${err.message.slice(0, 200)} – skipped`);
+      continue;
+    }
     for (const it of items) {
       if (!it.placeId || it.permanentlyClosed) continue;
       const row = byId.get(it.placeId) ?? {
@@ -296,6 +314,7 @@ if (args.search) {
         maps_url: it.url ?? null,
         areas: [],
         queries: [],
+        raw: it,
       };
       if (!row.areas.includes(r.label)) row.areas.push(r.label);
       if (it.searchString && !row.queries.includes(it.searchString))
@@ -307,8 +326,6 @@ if (args.search) {
   const rows = [...byId.values()].sort(
     (a, b) => b.review_count - a.review_count || (b.rating ?? 0) - (a.rating ?? 0),
   );
-  await mkdir("data/catalog", { recursive: true });
-  const base = `data/catalog/${city.toLowerCase()}-candidates`;
   await writeFile(`${base}.json`, JSON.stringify(rows, null, 1));
   const csv = [
     "keep,place_id,name,rating,review_count,price_level,primary_type,types,areas,queries,address,maps_url",

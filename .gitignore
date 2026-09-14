@@ -45,3 +45,6 @@ data/venues-*.json
 
 # Per-developer Claude Code permissions
 .claude/settings.local.json
+
+# Apify raw dumps are duplicated inside *-candidates.json
+data/catalog/*.raw.json
