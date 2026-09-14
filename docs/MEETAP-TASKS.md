@@ -114,6 +114,10 @@ Kurallar:
 
 - **2026-09-12 (gece, 2)** — Ali: "mesafe sıralamayı belirlemesin, yıl dönümü için bar önerme". Mesafe ağırlığı 1.1 → 0.4, istenen mutfak/ortam şehir genelinde aranıyor; amaç–mekan tipi kuralı eklendi (bar/pub/nargile, fast food/büfe, düğün salonu randevu/iş için elenir; aile/çalışma için bar elenir). Aynı cümle Bakü'de artık Sumakh / Мимино / Dolma; "Sahil Bar & Restaurant" ve "Nargile Çay Evi" tipi sonuçlar randevu için aday olamıyor. Konum uzaksa şehir merkezi havuzu da aday, mesafe puanı yumuşak azalıyor, tarayıcı konum doğruluğu kaydediliyor.
 
+## NEREDE KALDIK (2026-09-14)
+
+Ali: "87k açık veri yanlış başlangıç; Bakü'de 200–300 yorumu bol mekanla, kapalı kategorilerle devam edelim." Fikirler tek plana toplandı: `docs/MEETAP-PILOT-CATALOG-PLAN.md` (şema, mekan seçimi, ücretsiz veri adımları Google Places API + Tripadvisor API + elle tur, motor değişiklikleri, altın set ölçümü, bir haftalık sıra). Onay bekliyor; kod ondan sonra.
+
 ## NEREDE KALDIK (2026-09-12, gece)
 
 **Önce Vercel'e `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` eklenmeli**; bu yapılmadan canlı sitedeki hiçbir test DeepSeek'i ölçmüyor (her arama `parser = rules`).

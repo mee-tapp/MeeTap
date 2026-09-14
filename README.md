@@ -92,6 +92,8 @@ Aynı cümle Bakü merkezinde şimdi: Sumakh, Мимино, Dolma Restaurant; ka
 
 ## 2. Kalanlar (sırayla)
 
+> **Yön değişikliği önerisi (14 Eylül):** 87k açık veri yerine Bakü'de 250–300 iyi bilinen mekanlık kapalı şemalı katalog. Taslak plan: [`docs/MEETAP-PILOT-CATALOG-PLAN.md`](docs/MEETAP-PILOT-CATALOG-PLAN.md). Ali onaylayınca aşağıdaki liste ona göre yeniden yazılacak.
+
 0. **Vercel'de LLM anahtarı (acil, 5 dakika).** Vercel → Project → Settings → Environment Variables: `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` (Production + Preview), sonra Redeploy. Doğrulama: sitede arama yapın, kartın üstünde "Basic understanding mode" notu çıkmamalı; `query_logs.parser` `llm` olmalı. Aynı ekranda `VENUE_INTELLIGENCE_ENABLED`, `TRIPADVISOR_API_KEY` gibi diğer sunucu anahtarlarını da kontrol edin.
 1. **Yorum verisi kaynağı kararı** — Tripadvisor resmi API tek başına mı, API + sınırlı scraper mı. Anahtar `.env` → `TRIPADVISOR_API_KEY`; betik hazır: `scripts/enrich/tripadvisor.mjs`, profil üretimi `scripts/enrich/profile-llm.mjs`. Yorum verisi olmadan motor "doğru tür mekan"ı bulur ama "iyi mekan"ı ayırt edemez.
 2. **Profil üretimini tüm eşleşen mekanlara yaymak** ve sıralamada "yorumlara göre …" cümlelerini görmek; 30 cümlelik sıralama testi (Ali puanlar).
