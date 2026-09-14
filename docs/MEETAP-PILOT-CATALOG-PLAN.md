@@ -69,6 +69,13 @@ Seçim listesi bir tabloya (Google Sheet ya da `data/catalog/baku-pilot.csv`) ç
 
 Toplam ≈ 9,4 $. Ücretsiz kredi aylık 5 $: bu ay A + seçim + 150 mekanın detayı; kalan detaylar ve yorum derinliği 1 Ekim'den sonra, ya da Apify'a 5 $ yüklenip bir günde bitirilir (Ali'nin kararı). Fiyatlar Apify'ın olay başına listesinden; gerçek tutar çalıştırınca panelde görülür.
 
+**Yerel ücretsiz scraper (14 Eylül akşam, Ali'nin kararı: "test aşamasında scraper, sonra ücretli API").** Apify kredisi bitince kalan işi bilgisayarda çalışan açık kaynak `gosom/google-maps-scraper` yapıyor (Go ile kaynaktan derlendi: `~/go/bin/google-maps-scraper`). Mekan başına ~8 yorum, saatler, fiyat aralığı, Azerice olanak listesi ("Xüsusi nahar otağı" = kabinet). `-extra-reviews` (300 yorum) Google tarafından 403 ile engelleniyor; bunu aşan bir şey yazılmıyor. Girdi dosyaları `data/catalog/*.scraper-input.txt`, çıktılar `data/catalog/gosom/` (git dışı), yükleme `scripts/catalog/import-gosom.mjs --only-keep`. Kalite için `-c 1 -depth 1 -disable-page-reuse` şart: eşzamanlı modda olanaklar ve yorumlar eksik geliyor.
+
+```bash
+~/go/bin/google-maps-scraper -input data/catalog/baku-pilot.scraper-input.txt -results data/catalog/gosom/baku-pilot-v2.json -json -c 1 -depth 1 -disable-page-reuse -lang en -exit-on-inactivity 3m
+node --env-file=.env scripts/catalog/import-gosom.mjs data/catalog/gosom/baku-pilot-v2.json --city Baku --only-keep
+```
+
 **Eski üçlü karar (Google API + Apify + Tripadvisor), referans için:**
 
 | Kaynak                                                            | Ne verir                                                                                                                                    | Ücretsiz sınır                                                       | Betik                                                                            |

@@ -51,6 +51,20 @@ const currency = args.currency ?? (city === "Baku" ? "AZN" : "TRY");
 const dryRun = args["dry-run"] === true;
 const limit = args.limit ? Number(args.limit) : Infinity;
 const minReviews = Number(args["min-reviews"] ?? 0);
+/** --only-keep: import only place ids marked keep = 1 in data/catalog/<city>-pilot.csv
+ * (search-URL scrapes also return neighbouring places). */
+let keepIds = null;
+if (args["only-keep"] === true) {
+  const csv = await readFile(`data/catalog/${city.toLowerCase()}-pilot.csv`, "utf8");
+  keepIds = new Set(
+    csv
+      .split(/\r?\n/)
+      .slice(1)
+      .filter((l) => l.startsWith('"1"'))
+      .map((l) => l.split(",")[1]?.replace(/"/g, "")),
+  );
+  console.log(`${keepIds.size} keep = 1 place ids`);
+}
 
 // gosom writes one JSON object per line (or a JSON array) – accept both.
 const text = await readFile(file, "utf8");
@@ -63,6 +77,18 @@ try {
     .split(/\r?\n/)
     .filter((l) => l.trim())
     .map((l) => JSON.parse(l));
+}
+items = items.flatMap((x) => (Array.isArray(x) ? x : [x]));
+// One row per place (a search URL can list the same place twice).
+{
+  const byPlace = new Map();
+  for (const e of items) {
+    const key = e.place_id ?? e.title;
+    const prev = byPlace.get(key);
+    if (!prev || (e.user_reviews?.length ?? 0) > (prev.user_reviews?.length ?? 0))
+      byPlace.set(key, e);
+  }
+  items = [...byPlace.values()];
 }
 console.log(`${items.length} scraped places in ${file}`);
 
@@ -230,7 +256,12 @@ let reviewsStored = 0;
 let skipped = 0;
 for (const e of items.slice(0, limit)) {
   const v = mapEntry(e, candidates.get(e.place_id) ?? candidates.get(e.input_id) ?? null);
-  if (!v.google_place_id || v.lat == null || (v.review_count ?? 0) < minReviews) {
+  if (
+    !v.google_place_id ||
+    v.lat == null ||
+    (v.review_count ?? 0) < minReviews ||
+    (keepIds && !keepIds.has(v.google_place_id))
+  ) {
     skipped += 1;
     continue;
   }
