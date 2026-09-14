@@ -94,9 +94,9 @@ Aynı cümle Bakü merkezinde şimdi: Sumakh, Мимино, Dolma Restaurant; ka
 
 > **Yön değişikliği (14 Eylül, onaylandı):** 87k açık veri siliniyor; yerine Bakü'de 250–300 iyi bilinen mekanlık kapalı şemalı katalog. Plan ve adımlar: [`docs/MEETAP-PILOT-CATALOG-PLAN.md`](docs/MEETAP-PILOT-CATALOG-PLAN.md). Şema (migration 0021), taksonomi (`src/lib/catalog/taxonomy.ts`) ve betikler (`scripts/catalog/`) hazır. Sıradaki işler artık o dokümanın 6. bölümündeki tablodur; aşağıdaki liste eski akışın kalanlarıdır ve katalog bitince gözden geçirilecek.
 >
-> Ali'nin sıradaki üç işi: (0) `node --env-file=.env scripts/db/reset-venues.mjs` ile eski veriyi silmek; (1) `.env`'e `GOOGLE_PLACES_API_KEY`, `APIFY_TOKEN`, `TRIPADVISOR_API_KEY`; (2) Vercel'e `LLM_PROVIDER` ve `DEEPSEEK_API_KEY`.
+> Eski veri silindi, Vercel'de DeepSeek çalışıyor (14 Eylül, doğrulandı). Veri toplama yalnızca Apify Google Maps Scraper ile (`scripts/catalog/apify-places.mjs`); gereken tek anahtar `.env` → `APIFY_TOKEN` (ücretsiz plan, kartsız). Google Places / Tripadvisor betikleri alternatif olarak duruyor.
 
-0. **Vercel'de LLM anahtarı (acil, 5 dakika).** Vercel → Project → Settings → Environment Variables: `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` (Production + Preview), sonra Redeploy. Doğrulama: sitede arama yapın, kartın üstünde "Basic understanding mode" notu çıkmamalı; `query_logs.parser` `llm` olmalı. Aynı ekranda `VENUE_INTELLIGENCE_ENABLED`, `TRIPADVISOR_API_KEY` gibi diğer sunucu anahtarlarını da kontrol edin.
+0. ✅ Vercel'de LLM anahtarı — Nihat ekledi, 14 Eylül'de canlı yanıtta `parser: llm` doğrulandı.
 1. **Yorum verisi kaynağı kararı** — Tripadvisor resmi API tek başına mı, API + sınırlı scraper mı. Anahtar `.env` → `TRIPADVISOR_API_KEY`; betik hazır: `scripts/enrich/tripadvisor.mjs`, profil üretimi `scripts/enrich/profile-llm.mjs`. Yorum verisi olmadan motor "doğru tür mekan"ı bulur ama "iyi mekan"ı ayırt edemez.
 2. **Profil üretimini tüm eşleşen mekanlara yaymak** ve sıralamada "yorumlara göre …" cümlelerini görmek; 30 cümlelik sıralama testi (Ali puanlar).
 3. **Kalan ~77.000 mekanın ortam etiketlemesi** (~3,5 $ DeepSeek; onay bekliyor). Etiketsiz mekan amaç puanında nötr (0.4) kalıyor.

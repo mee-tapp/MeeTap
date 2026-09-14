@@ -59,7 +59,7 @@ Kurallar:
 - [ ] Artı/eksi (trade-off) çıkarımı: ilk 3 sonuç için "daha ucuz ama kalabalık" tarzı karşılaştırma
 - [x] ✅ Kapsama raporu: kontrol edilebilen / edilemeyen kriterler (`coverage`), eşlenemeyen istekler puanlamadan çıkar ve arayüzde "Not in our data yet, so not checked: …" notu; çok mutfaklı istekte ana mutfak önce, kısmi eşleşme açıklanır; uzak sonuçlarda "arabayla ~X dk" ve ayrı not
 - [x] ✅ LLM düşüş nedeni telemetrisi (`query_logs.parser_error`, migration 0015) + arayüzde "Basic understanding mode" notu
-- [ ] **Vercel ortam değişkenleri: `LLM_PROVIDER`, `DEEPSEEK_API_KEY` eklenecek** (canlı site hâlâ kural çözümleyicisinde — README bölüm 2, madde 0)
+- [x] ✅ Vercel ortam değişkenleri: `LLM_PROVIDER`, `DEEPSEEK_API_KEY` (Nihat, 14 Eylül; canlıda `parser: llm` doğrulandı)
 - [x] ✅ Sunucu fonksiyonları (`src/lib/venues/server.ts`): recommendVenues, fetchVenues, fetchFeatured, fetchVenue, submitReview
 - [x] ✅ Open-Meteo hava durumu entegrasyonu — `src/lib/weather.ts`
 - [x] ✅ Ana sayfa arama kutusu gerçek motora bağlı (animasyon aynı, sonuç kartı gerçek mekan + gerçek hava + tahmini bütçe + mesafe); öne çıkanlar ve harita pinleri gerçek
@@ -120,7 +120,7 @@ Ali'nin kararı: 87k açık veri silinir; Bakü'de 250–300 yorumu bol mekanla 
 
 Yapıldı: migration 0021 (katalog kolonları, `venues_nearby` `p_tier`), `src/lib/catalog/taxonomy.ts` (kapalı listeler + Google/Tripadvisor eşlemeleri), `scripts/catalog/{google-candidates, select-pilot, google-details, apify-reviews, merge-external}.mjs`, `scripts/db/reset-venues.mjs`; motor artık yalnızca `catalog_tier='pilot'` mekanlarla cevap verir.
 
-Sırada (Ali): eski veriyi sil (`reset-venues.mjs`), anahtarları `.env`'e gir (Google Places, Apify, Tripadvisor). Sonra Claude Adım A–E'yi koşar, Ali `keep` sütununu ve kalite turunu yapar, ardından motor kapalı şemaya geçer ve altın set ölçümü başlar.
+Eski veri silindi; Vercel'de DeepSeek çalışıyor (doğrulandı). Kaynak sadeleşti: yalnızca Apify Google Maps Scraper (`apify-places.mjs --search / --details`), tek anahtar `APIFY_TOKEN`. Sırada (Ali): Apify'da ücretsiz hesap, token `.env`'e. Sonra Claude Adım A'yı koşar, Ali `keep` sütununu düzeltir, Claude detay + yorumları yükler, kalite turu, motor kapalı şemaya geçer, altın set ölçümü.
 
 ## NEREDE KALDIK (2026-09-12, gece)
 

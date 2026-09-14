@@ -58,7 +58,18 @@ Seçim listesi bir tabloya (Google Sheet ya da `data/catalog/baku-pilot.csv`) ç
 
 ## 3. Veri kaynakları ve adım adım toplama (0 ₼)
 
-**Kaynak kararı (Claude): üçü birden.**
+**Kaynak kararı (güncel, 14 Eylül akşam): önce yalnızca Apify.** Ali'nin isteği "scraper kullanalım, anahtar peşinde koşmayalım". Google Cloud hesabı (kart) gerekmiyor; Apify'ın Google Maps Scraper'ı hem aday listesini hem mekan detayını (saatler, olanaklar, açıklama) hem yorumları veriyor. Tek anahtar: `APIFY_TOKEN` (ücretsiz plan, kartsız, ayda 5 $ kredi; kredi bitince çalışma durur, para çıkmaz). Google Places API betikleri (`google-candidates.mjs`, `google-details.mjs`) alternatif olarak repoda kalır; Tripadvisor sonraya.
+
+| Adım                                                                     | Betik                                         | Apify maliyeti (tahmini)             |
+| ------------------------------------------------------------------------ | --------------------------------------------- | ------------------------------------ |
+| A. Aday listesi: 36 arama × 20 sonuç merkez + 4 dış bölge × 3 arama × 10 | `apify-places.mjs --search`                   | ≈ 840 mekan × 0,004 $ ≈ 3,4 $        |
+| B. Seçim (`keep` sütunu)                                                 | `select-pilot.mjs` + elle                     | 0                                    |
+| C+D. 300 mekan detay + 10'ar yorum                                       | `apify-places.mjs --details --max-reviews 10` | 300 × 0,006 + 3.000 × 0,0005 ≈ 3,3 $ |
+| Yorum derinliği (25'e tamamlama, sonraki ay)                             | `apify-reviews.mjs --max-reviews 25`          | ≈ 4.500 × 0,0006 ≈ 2,7 $             |
+
+Toplam ≈ 9,4 $. Ücretsiz kredi aylık 5 $: bu ay A + seçim + 150 mekanın detayı; kalan detaylar ve yorum derinliği 1 Ekim'den sonra, ya da Apify'a 5 $ yüklenip bir günde bitirilir (Ali'nin kararı). Fiyatlar Apify'ın olay başına listesinden; gerçek tutar çalıştırınca panelde görülür.
+
+**Eski üçlü karar (Google API + Apify + Tripadvisor), referans için:**
 
 | Kaynak                                                            | Ne verir                                                                                                                                    | Ücretsiz sınır                                                       | Betik                                                                            |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -68,7 +79,14 @@ Seçim listesi bir tabloya (Google Sheet ya da `data/catalog/baku-pilot.csv`) ç
 
 Neden Apify: kendi scraper'ımızı yazıp Google'ın bot korumasını aşmakla uğraşmıyoruz; hosted bir servisin API'sini çağırıyoruz, hacim küçük (300 mekan), ücretsiz kotada. Google'ın hizmet şartları açısından risk sıfır değil; Ali bunu bilerek "scraper kullanacağız" dedi. Ham yorumlar `venue_reviews_external`'da durur, arayüzde gösterilmez; kullanıcıya LLM profili ve kaynaklı puanlar gider. Wolt/sosyal medya yatırım sonrası.
 
-### Adım A – Aday listesi (`google-candidates.mjs`)
+### Adım A – Aday listesi (`apify-places.mjs --search`; alternatif `google-candidates.mjs`)
+
+```bash
+node --env-file=.env scripts/catalog/apify-places.mjs --search --city Baku --dry-run   # sorguları ve maliyeti gösterir
+node --env-file=.env scripts/catalog/apify-places.mjs --search --city Baku
+```
+
+Google Places API yolu (anahtar varsa):
 
 - Google Cloud'da proje + faturalama hesabı (kart ister; kotalar ücretsiz). `.env` → `GOOGLE_PLACES_API_KEY`.
 - 10 Bakü bölgesi (merkez semtler + Bilgəh, Mərdəkan, Novxanı) × 38 sorgu ("Azerbaijani cuisine restaurant", "restaurant with private rooms", "cheesecake", "hookah lounge"…) Text Search; her mekan tek satır: ad, koordinat, puan, yorum sayısı, fiyat, Google tipleri. ~380 çağrı (Pro kotası 5.000).
@@ -86,7 +104,16 @@ node --env-file=.env scripts/catalog/google-candidates.mjs --city Baku
 node scripts/catalog/select-pilot.mjs --city Baku
 ```
 
-### Adım C – Mekan detayı (`google-details.mjs`)
+### Adım C – Mekan detayı (`apify-places.mjs --details`; alternatif `google-details.mjs`)
+
+```bash
+node --env-file=.env scripts/catalog/apify-places.mjs --details --city Baku --max-reviews 10 --limit 3 --dry-run
+node --env-file=.env scripts/catalog/apify-places.mjs --details --city Baku --max-reviews 10
+```
+
+Scraper'ın "additionalInfo" olanakları (Outdoor seating, Live music, Private dining room, Halal food, Good for kids, Romantic…) `GOOGLE_AMENITY_MAP` ile özelliklere, amaçlara ve ortam etiketlerine; kategori adları (`Azerbaijani restaurant`, `Hookah bar`, `Pastry shop`…) `GOOGLE_CATEGORY_NAME_MAP` ile tür ve mutfağa çevrilir.
+
+Google Places API yolu (anahtar varsa):
 
 - `keep = 1` satırlar için tek Place Details çağrısı, alan maskesiyle: çalışma saatleri, `priceLevel`, `reviews` (en fazla 5), `outdoorSeating`, `liveMusic`, `reservable`, `goodForChildren`, `goodForGroups`, `servesBreakfast/Brunch/Lunch/Dinner/Dessert/Coffee/Wine/Beer/Cocktails/VegetarianFood`, `parkingOptions`, `accessibilityOptions`, `editorialSummary`. 300 çağrı = aylık 1.000 Enterprise kotasının içinde.
 - **Saklama kuralı:** Google Maps Platform şartları Places içeriğinin (place_id hariç) en fazla 30 gün önbelleklenmesine izin verir. Bu yüzden Google'dan gelen ham alanlar aylık yenilenir (300 çağrı, ücretsiz); yorumların kendisi ham olarak saklanmaz, LLM ile üretilen **profil** (bizim türev içeriğimiz) saklanır. Bu ayrımı hukuken bir kez teyit ettirmek gerekir.
@@ -146,19 +173,19 @@ node --env-file=.env scripts/catalog/merge-external.mjs --city Baku
 
 ## 6. Sıra ve süre (tahmini, iki kişi)
 
-| #   | İş                                                                      | Kim                     | Süre     |
-| --- | ----------------------------------------------------------------------- | ----------------------- | -------- |
-| 0   | Eski veriyi sil: `node --env-file=.env scripts/db/reset-venues.mjs`     | Ali                     | 1 dk     |
-| 1   | Anahtarlar `.env`'e: Google Places, Apify, Tripadvisor (asla commit)    | Ali                     | 1 saat   |
-| 2   | ✅ Şema (0021), taksonomi, betikler                                     | Claude                  | yapıldı  |
-| 3   | Adım A + B: aday listesi ve öneri seçimi                                | Claude koşar            | 10 dk    |
-| 4   | Elle seçim: `keep` sütunu                                               | Ali                     | 1 saat   |
-| 5   | Adım C + D + E: Google detay, Apify yorumlar, Tripadvisor + birleştirme | Claude koşar            | 1 saat   |
-| 6   | Adım F: profil üretimi (şema genişletme + toplu betik)                  | Claude                  | 1 gün    |
-| 7   | Adım G: elle kalite turu                                                | Ali                     | 3 saat   |
-| 8   | Motor: kapalı şema, `dish`, özellik eşleşmesi, yorum tabanlı puan       | Claude + Ali            | 2 gün    |
-| 9   | Altın set + ranking-eval; ağırlık ayarı                                 | Ali yazar, Claude koşar | 1 gün    |
-| 10  | Vercel'e anahtarlar, canlı test                                         | Ali                     | 0,5 saat |
+| #   | İş                                                                                                   | Kim                     | Süre     |
+| --- | ---------------------------------------------------------------------------------------------------- | ----------------------- | -------- |
+| 0   | Eski veriyi sil: `node --env-file=.env scripts/db/reset-venues.mjs`                                  | Ali                     | 1 dk     |
+| 1   | `.env` → `APIFY_TOKEN` (apify.com ücretsiz hesap, kartsız); Google/Tripadvisor anahtarı şimdilik yok | Ali                     | 10 dk    |
+| 2   | ✅ Şema (0021), taksonomi, betikler                                                                  | Claude                  | yapıldı  |
+| 3   | Adım A + B: `apify-places.mjs --search` ve `select-pilot.mjs`                                        | Claude koşar            | 30 dk    |
+| 4   | Elle seçim: `keep` sütunu                                                                            | Ali                     | 1 saat   |
+| 5   | Adım C + D: `apify-places.mjs --details` (detay + yorumlar); Tripadvisor sonra                       | Claude koşar            | 1 saat   |
+| 6   | Adım F: profil üretimi (şema genişletme + toplu betik)                                               | Claude                  | 1 gün    |
+| 7   | Adım G: elle kalite turu                                                                             | Ali                     | 3 saat   |
+| 8   | Motor: kapalı şema, `dish`, özellik eşleşmesi, yorum tabanlı puan                                    | Claude + Ali            | 2 gün    |
+| 9   | Altın set + ranking-eval; ağırlık ayarı                                                              | Ali yazar, Claude koşar | 1 gün    |
+| 10  | Vercel'e anahtarlar, canlı test                                                                      | Ali                     | 0,5 saat |
 
 Toplam: yaklaşık bir hafta. Cepten çıkan para: DeepSeek profilleri için < 1 $; Google ve Tripadvisor kotalarının içinde kalınır (kart tanımlı olur ama harcama sıfır; günlük bütçe limitleri her iki panelde de kapatılır).
 
