@@ -47,7 +47,7 @@ const MIN_REVIEWS = {
 };
 const MIN_RATING = Number(args["min-rating"] ?? 4.0);
 /** "Worth the trip" areas outside the centre get a guaranteed quota. */
-const OUTSIDE_AREAS = ["Bilgəh / Nardaran", "Mərdəkan / Şüvəlan", "Novxanı"];
+const OUTSIDE_AREAS = ["Bilgah", "Bilgəh", "Mardakan", "Mərdəkan", "Novxanı", "Novkhani", "Nardaran"];
 const OUTSIDE_QUOTA = 15;
 
 function wordIn(name, w) {
@@ -95,8 +95,8 @@ for (const [type, target] of Object.entries(TARGET)) {
 const outside = rows
   .filter(
     (r) =>
-      r.areas.some((a) => OUTSIDE_AREAS.includes(a)) &&
-      r.review_count >= 100 &&
+      r.areas.some((a) => OUTSIDE_AREAS.some((o) => a.includes(o))) &&
+      r.review_count >= 50 &&
       (r.rating ?? 0) >= MIN_RATING,
   )
   .sort((a, b) => b.review_count - a.review_count)
