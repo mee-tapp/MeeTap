@@ -23,6 +23,8 @@ import type { Feature, Meal } from "../catalog/taxonomy.ts";
 // --- normalisation ---------------------------------------------------------
 
 const TR_MAP: Record<string, string> = {
+  ə: "e",
+  Ə: "e",
   ç: "c",
   ğ: "g",
   ı: "i",
@@ -44,7 +46,7 @@ const TR_MAP: Record<string, string> = {
 /** Lowercase + strip Turkish diacritics so "Sakin" / "sakın" / "SAKIN" all match. */
 export function normalizeTr(input: string): string {
   return input
-    .replace(/[çğıöşüâîûÇĞİIÖŞÜ]/g, (ch) => TR_MAP[ch] ?? ch)
+    .replace(/[çğıöşüâîûÇĞİIÖŞÜəƏ]/g, (ch) => TR_MAP[ch] ?? ch)
     .toLowerCase()
     .replace(/[’'`]/g, "")
     .replace(/\s+/g, " ")
@@ -313,6 +315,61 @@ const MEAL_DICT: Dict<Meal> = [
   [["aksam yemegi", "aksam", "sam yemeyi", "dinner", "axsam"], "dinner"],
   [["gece gec", "gece yarisi", "late night", "gec saat"], "late_night"],
 ];
+
+/**
+ * Dishes people ask for by name (az / tr / en spellings, normalised). The
+ * canonical value is what the intent carries; `dishVariants()` gives every
+ * spelling so review texts in any language match ("xəngəl" ↔ "khinkali").
+ */
+const DISH_DICT: Dict<string> = [
+  [["xengel", "xingal", "hinkali", "khinkali", "xinkali", "hingal"], "xəngəl"],
+  [["dolma", "yarpaq dolmasi", "yaprak sarma"], "dolma"],
+  [["plov", "pilav", "pilaf", "shah plov", "sah plov"], "plov"],
+  [["qutab", "kutab", "qutabi", "gutab"], "qutab"],
+  [["sac ici", "sac ichi", "saj ichi", "sadj"], "sac içi"],
+  [["dushbara", "dusbere", "dushbere", "dusbara"], "düşbərə"],
+  [["piti"], "piti"],
+  [["levengi", "lavangi"], "ləvəngi"],
+  [["shashlik", "saslik", "sashlik", "sis"], "shashlik"],
+  [["qovurma", "kavurma", "govurma"], "qovurma"],
+  [["kufte", "kofte", "koefte"], "köfte"],
+  [["lahmacun"], "lahmacun"],
+  [["pide"], "pide"],
+  [["manti"], "mantı"],
+  [["cig kofte"], "çiğ köfte"],
+  [["iskender"], "iskender"],
+  [["kokorec"], "kokoreç"],
+  [["doner", "dener", "shawarma", "savarma"], "döner"],
+  [["kunefe", "kunafa"], "künefe"],
+  [["baklava", "paxlava", "pakhlava"], "baklava"],
+  [["sekerbura", "shekerbura"], "şəkərbura"],
+  [["cheesecake", "cizkek", "chizkeyk"], "cheesecake"],
+  [["tiramisu"], "tiramisu"],
+  [["waffle", "vafli"], "waffle"],
+  [["pancake", "pankek"], "pancake"],
+  [["menemen"], "menemen"],
+  [["gozleme"], "gözleme"],
+  [["borek", "burek"], "börek"],
+  [["balik ekmek"], "balık ekmek"],
+  [["hummus", "humus"], "hummus"],
+  [["falafel"], "falafel"],
+  [["ramen"], "ramen"],
+  [["pho"], "pho"],
+  [["dim sum", "dimsum"], "dim sum"],
+  [["hacapuri", "khachapuri", "xacapuri"], "khachapuri"],
+  [["pizza margherita", "margarita pizza"], "margherita"],
+];
+const DISH_WORDS = new Set(DISH_DICT.flatMap(([phrases]) => phrases));
+const DISH_VARIANTS = new Map(DISH_DICT.map(([phrases, canon]) => [canon, phrases]));
+
+/** Every spelling of a dish worth searching review texts for. */
+export function dishVariants(dish: string): string[] {
+  const norm = normalizeTr(dish);
+  const canonical =
+    DISH_DICT.find(([phrases, canon]) => canon === dish || phrases.includes(norm))?.[1] ?? dish;
+  const variants = new Set([dish, norm, canonical, ...(DISH_VARIANTS.get(canonical) ?? [])]);
+  return [...variants].filter((v) => v.length >= 3);
+}
 
 const NEED_DICT: Dict<Need> = [
   [["wifi", "wi-fi", "internet"], "wifi"],
@@ -685,7 +742,8 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
     ),
   ]
     .map((m) => m[1]!)
-    .filter((w) => !GENERIC_CUISINE_STOP.has(w));
+    // "xəngəl restoranı" names a dish, not a cuisine
+    .filter((w) => !GENERIC_CUISINE_STOP.has(w) && !DISH_WORDS.has(w));
   const mappedGeneric = generic.map((w) => CUISINE_WORD_MAP[w] ?? w);
   intent.cuisines = [...new Set([...intent.cuisines, ...mappedGeneric])];
   intent.cuisine_keywords = [
@@ -698,6 +756,7 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
   intent.needs = findAll(text, NEED_DICT);
   intent.features = findAll(text, FEATURE_DICT);
   intent.meals = findAll(text, MEAL_DICT);
+  intent.dish = findAll(text, DISH_DICT)[0] ?? null;
   intent.categories = findAll(text, CATEGORY_DICT);
   // A cuisine request implies a restaurant unless the user said café/bar. This is
   // a guess, not a stated category, so mark it non-explicit: retrieval should

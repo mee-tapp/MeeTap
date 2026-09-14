@@ -3,8 +3,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentWeather, type CurrentWeather } from "../weather.ts";
 import { emptyIntent, type Intent, type Need, type ParsedIntent, type Purpose } from "./intent.ts";
 import { FEATURE_LABEL, MEAL_LABEL, type Feature, type Meal } from "../catalog/taxonomy.ts";
+import { createHash } from "node:crypto";
 import { parseIntentWithLlm } from "./llm-parser.ts";
-import { parseIntentWithRules } from "./rule-parser.ts";
+import { dishVariants, parseIntentWithRules } from "./rule-parser.ts";
+import { IntentSchema } from "./intent.ts";
 import {
   DEFAULT_WEIGHTS,
   explain,
@@ -522,6 +524,42 @@ function detectQueryLocale(raw: string): "tr" | "en" {
 }
 
 /**
+ * Same sentence, same intent: a successful LLM parse is stored in
+ * intent_cache and reused (people retry the same sentence while testing,
+ * and the LLM provider is not always up). Rule-parsed results are never
+ * cached so a provider outage does not freeze weak parses.
+ */
+async function parseIntentCached(supabase: SupabaseClient, raw: string): Promise<ParsedIntent> {
+  const key = createHash("sha1")
+    .update(raw.trim().toLowerCase().replace(/\s+/g, " "))
+    .digest("hex");
+  try {
+    const { data } = await supabase
+      .from("intent_cache")
+      .select("parsed_intent, parser")
+      .eq("query_hash", key)
+      .maybeSingle();
+    if (data?.parser === "llm") {
+      const ok = IntentSchema.safeParse(data.parsed_intent);
+      if (ok.success) return { intent: ok.data, parser: "llm", raw, confidence: 0.9 };
+    }
+  } catch {
+    /* cache is best-effort */
+  }
+  const parsed = await parseIntentWithLlm(raw);
+  if (parsed.parser === "llm") {
+    void supabase
+      .from("intent_cache")
+      .upsert({ query_hash: key, raw_query: raw, parsed_intent: parsed.intent, parser: "llm" })
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+  }
+  return parsed;
+}
+
+/**
  * How many stored real reviews of each venue in the city mention the dish
  * (case/diacritic-insensitive substring), plus signature_dishes hits.
  * One query, bounded; empty map when nothing mentions it.
@@ -532,12 +570,15 @@ async function countDishMentions(
   city: string,
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
-  const needle = dish.replace(/[%_]/g, "");
+  const needles = dishVariants(dish)
+    .map((v) => v.replace(/[%_,()]/g, ""))
+    .filter(Boolean);
+  const needle = needles[0] ?? dish;
   const { data: reviews } = await supabase
     .from("venue_reviews_external")
     .select("venue_id, venues!inner(city)")
     .eq("venues.city", city)
-    .ilike("body", `%${needle}%`)
+    .or(needles.map((n) => `body.ilike.%${n}%`).join(","))
     .limit(2000);
   for (const r of (reviews ?? []) as Array<{ venue_id: string }>)
     counts.set(r.venue_id, (counts.get(r.venue_id) ?? 0) + 1);
@@ -678,11 +719,11 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     // place isn't in the DB yet). Fall through to normal discovery below.
   }
 
-  // 1. Intent (LLM with rule fallback) and weather, in parallel.
+  // 1. Intent (cache → LLM chain → rules) and weather, in parallel.
   const [parsed, weather] = await Promise.all([
     input.parser === "rules"
       ? Promise.resolve(parseIntentWithRules(input.query))
-      : parseIntentWithLlm(input.query),
+      : parseIntentCached(supabase, input.query),
     getCurrentWeather(origin.lat, origin.lon),
   ]);
   const intent: Intent = { ...parsed.intent, confidence: parsed.confidence };

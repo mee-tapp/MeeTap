@@ -24,14 +24,12 @@ import { ASPECT_KEYS, CAUTION_TAGS } from "./venue-intelligence.ts";
 
 export type LlmProvider = "deepseek" | "gemini" | "groq" | "none";
 
-export type ProviderConfig = { url: string; model: string; key: string };
+export type ProviderConfig = { name: LlmProvider; url: string; model: string; key: string };
 
-/** The one place MeeTap resolves an LLM provider from env – reused by
- * scripts (e.g. profile-llm.mjs) so there is never a second LLM config path. */
-export function providerConfig(): ProviderConfig | null {
-  const provider = (process.env["LLM_PROVIDER"] ?? "none") as LlmProvider;
+function configFor(provider: LlmProvider): ProviderConfig | null {
   if (provider === "deepseek" && process.env["DEEPSEEK_API_KEY"]) {
     return {
+      name: "deepseek",
       url: "https://api.deepseek.com/chat/completions",
       model: process.env["DEEPSEEK_MODEL"] ?? "deepseek-chat",
       key: process.env["DEEPSEEK_API_KEY"],
@@ -39,6 +37,7 @@ export function providerConfig(): ProviderConfig | null {
   }
   if (provider === "groq" && process.env["GROQ_API_KEY"]) {
     return {
+      name: "groq",
       url: "https://api.groq.com/openai/v1/chat/completions",
       model: process.env["GROQ_MODEL"] ?? "llama-3.3-70b-versatile",
       key: process.env["GROQ_API_KEY"],
@@ -46,12 +45,37 @@ export function providerConfig(): ProviderConfig | null {
   }
   if (provider === "gemini" && process.env["GEMINI_API_KEY"]) {
     return {
+      name: "gemini",
       url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       model: process.env["GEMINI_MODEL"] ?? "gemini-2.5-flash",
       key: process.env["GEMINI_API_KEY"],
     };
   }
   return null;
+}
+
+/**
+ * Providers to try, in order: LLM_PROVIDER first, then every other provider
+ * that has a key. On 2026-09-15 DeepSeek's chat endpoint stopped answering
+ * for hours while the balance was fine – with a second key (Groq free tier
+ * is fast and needs no card) the parser keeps working instead of falling
+ * back to the rules.
+ */
+const PROVIDER_DOWN_UNTIL = new Map<LlmProvider, number>();
+const PROVIDER_COOLDOWN_MS = 90_000;
+
+export function providerChain(): ProviderConfig[] {
+  const primary = (process.env["LLM_PROVIDER"] ?? "none") as LlmProvider;
+  const order = [...new Set<LlmProvider>([primary, "groq", "gemini", "deepseek"])].filter(
+    (p) => p !== "none",
+  );
+  return order.map(configFor).filter((c): c is ProviderConfig => c != null);
+}
+
+/** The one place MeeTap resolves an LLM provider from env – reused by
+ * scripts (e.g. profile-llm.mjs) so there is never a second LLM config path. */
+export function providerConfig(): ProviderConfig | null {
+  return providerChain()[0] ?? null;
 }
 
 const SYSTEM_PROMPT = `You convert ONE sentence from a user of Meetap (a venue recommendation app for Istanbul and Baku) into a strict JSON object. The sentence is usually Turkish, sometimes English or Azerbaijani.
@@ -183,11 +207,38 @@ export async function parseIntentWithLlm(
   opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<LlmParseResult> {
   const rules = parseIntentWithRules(raw);
-  const cfg = providerConfig();
-  if (!cfg) return { ...rules, fallback_reason: "llm_not_configured" };
+  const chain = providerChain();
+  if (chain.length === 0) return { ...rules, fallback_reason: "llm_not_configured" };
 
+  const failures: string[] = [];
+  for (const cfg of chain) {
+    // A provider that just timed out is skipped for a while so every search
+    // does not pay the full timeout again (per server instance).
+    const downUntil = PROVIDER_DOWN_UNTIL.get(cfg.name) ?? 0;
+    if (downUntil > Date.now()) {
+      failures.push(`${cfg.name}: cooling down`);
+      continue;
+    }
+    const result = await parseWithProvider(cfg, raw, rules, opts);
+    if ("intent" in result) return result;
+    failures.push(`${cfg.name}: ${result.error}`);
+    if (/timeout|HTTP 5\d\d|fetch failed/i.test(result.error))
+      PROVIDER_DOWN_UNTIL.set(cfg.name, Date.now() + PROVIDER_COOLDOWN_MS);
+    console.warn(`[intent] ${cfg.name} failed (${result.error}), trying next provider`);
+  }
+  console.warn(`[intent] all providers failed, using rules: ${failures.join("; ")}`);
+  return { ...rules, fallback_reason: failures.join("; ").slice(0, 200) };
+}
+
+async function parseWithProvider(
+  cfg: ProviderConfig,
+  raw: string,
+  rules: ParsedIntent,
+  opts: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<LlmParseResult | { error: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8000);
+  // Short per-provider budget: a slow provider should hand over, not stall the search.
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 6000);
   const started = Date.now();
   try {
     const res = await fetch(cfg.url, {
@@ -256,8 +307,7 @@ export async function parseIntentWithLlm(
     };
   } catch (err) {
     const message = (err as Error).name === "AbortError" ? "timeout" : (err as Error).message;
-    console.warn(`[intent] LLM parse failed, using rules: ${message}`);
-    return { ...rules, fallback_reason: message.slice(0, 200) };
+    return { error: message.slice(0, 120) };
   } finally {
     clearTimeout(timer);
   }
