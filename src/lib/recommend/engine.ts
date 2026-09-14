@@ -88,6 +88,15 @@ export type VenueRow = {
   district: string | null;
   seaside: boolean | null;
   raw_type?: string | null;
+  // Pilot catalog columns (migration 0021); null/empty on open-data rows.
+  establishment_type?: string | null;
+  meals?: string[] | null;
+  features?: string[] | null;
+  signature_dishes?: string[] | null;
+  external_rating?: number | null;
+  external_review_count?: number | null;
+  profile?: string | null;
+  catalog_tier?: string | null;
 };
 
 export type Recommendation = {
@@ -226,6 +235,8 @@ export function serviceClient(): SupabaseClient {
 }
 
 const DEFAULT_CATEGORIES = ["Cafés", "Restaurants", "Bars"];
+/** Which venues the recommender may answer with (see supabase/migrations/0021). */
+const CATALOG_TIER = process.env["CATALOG_TIER"] ?? "pilot";
 
 /** Data-side cuisine values that satisfy an intent cuisine (mirrors the scorer's
  * strict aliases – no generic "regional"/"local" words). Unknown keys map to themselves. */
@@ -621,6 +632,9 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       p_tags: extra.tags ?? null,
       p_cuisines: extra.cuisines ?? null,
       p_name_keywords: extra.nameKeywords ?? null,
+      // Decision 2026-09-14: the recommender answers from the curated pilot
+      // catalog only (fully described, reviewed venues); open data is gone.
+      p_tier: CATALOG_TIER,
     });
     if (error) throw new Error(`venues_nearby: ${error.message}`);
     return (data ?? []) as VenueRow[];
@@ -776,6 +790,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       p_limit: 600,
       p_tags: null,
       p_cuisines: null,
+      p_tier: CATALOG_TIER,
     });
     const broadRows = (broadData ?? []) as VenueRow[];
     if (broadRows.length) {

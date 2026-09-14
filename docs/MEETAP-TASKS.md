@@ -116,7 +116,11 @@ Kurallar:
 
 ## NEREDE KALDIK (2026-09-14)
 
-Ali: "87k açık veri yanlış başlangıç; Bakü'de 200–300 yorumu bol mekanla, kapalı kategorilerle devam edelim." Fikirler tek plana toplandı: `docs/MEETAP-PILOT-CATALOG-PLAN.md` (şema, mekan seçimi, ücretsiz veri adımları Google Places API + Tripadvisor API + elle tur, motor değişiklikleri, altın set ölçümü, bir haftalık sıra). Onay bekliyor; kod ondan sonra.
+Ali'nin kararı: 87k açık veri silinir; Bakü'de 250–300 yorumu bol mekanla kapalı şemalı katalog; kaynaklar Google Places API + Apify yorumları + Tripadvisor API; Bakü dışı gidilir mekanlar dahil; öneri sistemi Ali + Claude. Plan: `docs/MEETAP-PILOT-CATALOG-PLAN.md`.
+
+Yapıldı: migration 0021 (katalog kolonları, `venues_nearby` `p_tier`), `src/lib/catalog/taxonomy.ts` (kapalı listeler + Google/Tripadvisor eşlemeleri), `scripts/catalog/{google-candidates, select-pilot, google-details, apify-reviews, merge-external}.mjs`, `scripts/db/reset-venues.mjs`; motor artık yalnızca `catalog_tier='pilot'` mekanlarla cevap verir.
+
+Sırada (Ali): eski veriyi sil (`reset-venues.mjs`), anahtarları `.env`'e gir (Google Places, Apify, Tripadvisor). Sonra Claude Adım A–E'yi koşar, Ali `keep` sütununu ve kalite turunu yapar, ardından motor kapalı şemaya geçer ve altın set ölçümü başlar.
 
 ## NEREDE KALDIK (2026-09-12, gece)
 

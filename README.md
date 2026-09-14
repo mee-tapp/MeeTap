@@ -92,7 +92,9 @@ Aynı cümle Bakü merkezinde şimdi: Sumakh, Мимино, Dolma Restaurant; ka
 
 ## 2. Kalanlar (sırayla)
 
-> **Yön değişikliği önerisi (14 Eylül):** 87k açık veri yerine Bakü'de 250–300 iyi bilinen mekanlık kapalı şemalı katalog. Taslak plan: [`docs/MEETAP-PILOT-CATALOG-PLAN.md`](docs/MEETAP-PILOT-CATALOG-PLAN.md). Ali onaylayınca aşağıdaki liste ona göre yeniden yazılacak.
+> **Yön değişikliği (14 Eylül, onaylandı):** 87k açık veri siliniyor; yerine Bakü'de 250–300 iyi bilinen mekanlık kapalı şemalı katalog. Plan ve adımlar: [`docs/MEETAP-PILOT-CATALOG-PLAN.md`](docs/MEETAP-PILOT-CATALOG-PLAN.md). Şema (migration 0021), taksonomi (`src/lib/catalog/taxonomy.ts`) ve betikler (`scripts/catalog/`) hazır. Sıradaki işler artık o dokümanın 6. bölümündeki tablodur; aşağıdaki liste eski akışın kalanlarıdır ve katalog bitince gözden geçirilecek.
+>
+> Ali'nin sıradaki üç işi: (0) `node --env-file=.env scripts/db/reset-venues.mjs` ile eski veriyi silmek; (1) `.env`'e `GOOGLE_PLACES_API_KEY`, `APIFY_TOKEN`, `TRIPADVISOR_API_KEY`; (2) Vercel'e `LLM_PROVIDER` ve `DEEPSEEK_API_KEY`.
 
 0. **Vercel'de LLM anahtarı (acil, 5 dakika).** Vercel → Project → Settings → Environment Variables: `LLM_PROVIDER=deepseek` ve `DEEPSEEK_API_KEY` (Production + Preview), sonra Redeploy. Doğrulama: sitede arama yapın, kartın üstünde "Basic understanding mode" notu çıkmamalı; `query_logs.parser` `llm` olmalı. Aynı ekranda `VENUE_INTELLIGENCE_ENABLED`, `TRIPADVISOR_API_KEY` gibi diğer sunucu anahtarlarını da kontrol edin.
 1. **Yorum verisi kaynağı kararı** — Tripadvisor resmi API tek başına mı, API + sınırlı scraper mı. Anahtar `.env` → `TRIPADVISOR_API_KEY`; betik hazır: `scripts/enrich/tripadvisor.mjs`, profil üretimi `scripts/enrich/profile-llm.mjs`. Yorum verisi olmadan motor "doğru tür mekan"ı bulur ama "iyi mekan"ı ayırt edemez.
