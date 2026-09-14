@@ -118,7 +118,7 @@ Kurallar:
 
 Katalog canlı: Apify ile 771 aday (merkez + Bilgəh/Mərdəkan/Novxanı/Nardaran), otomatik seçimle 181 mekan, yerel `gosom/google-maps-scraper` ile yorumlar (mekan başına ~5–8), Google puanı ve yorum sayısı, Azerice olanaklar (kabinet = "Xüsusi nahar otağı"). 180 mekan + 900 yorum Supabase'de (`catalog_tier='pilot'`). Motor kapalı şemaya geçti: `features` (kabinet, karaoke, canlı müzik…), `meals`, `dish` (yorum metinlerinde arama: "xəngəl" → Xəngəlation), Google puanı kalite sinyali, `good_for` verisi amaç kanıtı. Test seti: kurallar 25/25, DeepSeek 25/25.
 
-Sürüyor: 181 mekanın tek eşzamanlılıkla yeniden çekimi (daha zengin olanaklar), 59 kafe/tatlıcının tam çekimi. Sonra: kafe ekleme, LLM profil (imza yemekler), Ali'nin 40 cümlelik altın seti.
+Tamamlandı: 181 mekanın tek eşzamanlılıkla yeniden çekimi (kabinet bilgisi 48 mekanda, fiyat aralığı 133 mekanda) ve kafe/tatlıcı turu (91 mekan). Sonra: LLM profil (imza yemekler), Ali'nin 40 cümlelik altın seti, Tripadvisor ikinci puan (anahtar gelince).
 
 ## NEREDE KALDIK (2026-09-14)
 

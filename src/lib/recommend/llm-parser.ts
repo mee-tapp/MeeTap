@@ -120,6 +120,11 @@ const DRINK_FEATURE: Record<string, (typeof FEATURES)[number]> = {
   coffee: "specialty_coffee",
   latte: "specialty_coffee",
   espresso: "specialty_coffee",
+  "filtre kahve": "specialty_coffee",
+  "filter coffee": "specialty_coffee",
+  "türk kahvesi": "specialty_coffee",
+  cappuccino: "specialty_coffee",
+  "çay evi": "tea_selection",
 };
 const DRINK_WORDS = new Set(Object.keys(DRINK_FEATURE));
 
