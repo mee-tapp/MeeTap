@@ -79,13 +79,15 @@ Kurallar: onaylı arayüz tasarımı değişmez; sahte mekan/yorum yok; yatırı
 
 - **2026-09-11** — Açık veri boru hattı: OSM + Overture, İstanbul 80.431 + Bakü 7.234 mekan; DeepSeek niyet çözümleyici; uçtan uca öneri; arayüz gerçek veriye bağlandı.
 - **2026-09-12** — Kıyı verisi (`seaside`), 3 sonuçlu kart, açık mutfak sözlüğü, dürüst açıklamalar, konum izni, fiyat seviyesi; Nihat'ın venue intelligence katmanı ve Tripadvisor pilotu; scaffold temizliği. Ali'nin Azerice test cümlesi üzerine: kapsama raporu, mesafe ağırlığı düşürüldü, amaç–mekan tipi kuralı, şehrin kendi mutfağı kanıtı, kaba konum eleme. Canlıda DeepSeek'in çalışmadığı bulundu (Vercel anahtarı).
+- **2026-09-15** — Ali: "xəngəl restoranı" yanlış sonuç veriyor ve uzun sürüyor. Neden: DeepSeek chat API saatlerce yanıt vermedi (bakiye 6,91 $, sorun onlarda); her arama 8 sn zaman aşımı + kural ayrıştırıcısı, o da "xəngəl"i bilmiyordu. Genel çözüm: LLM sağlayıcı zinciri (DeepSeek → Groq → Gemini, anahtar varsa) + 90 sn soğuma, niyet önbelleği (`intent_cache`), kural ayrıştırıcısına 36 yemeklik sözlük (xəngəl = khinkali = hinkali), Azerice ə normalizasyonu, yemek adı yorumlarda tüm yazımlarıyla aranıyor. DeepSeek kapalıyken bile "xəngəl restoranı" → Xəngəlation, Marani, Gaumarjos (3 sn).
 - **2026-09-14** — Yön değişikliği: pilot katalog. Apify ile 771 aday; eski veri silindi; Vercel'de DeepSeek doğrulandı (Nihat). Yerel scraper kuruldu (Go), 181 mekan + 91 kafe çekildi ve yüklendi (261 mekan, 2.162 yorum). Taksonomi (EN/AZ etiketler), migration 0021–0022, motor kapalı şemaya geçti (özellik, öğün, yemek adı, Google puanı, good_for). Sonuç: "kabinetli Azerbaycan restoranı, yıl dönümü" → Anadolu, Nərgiz, Firuzə, Sumakh; "xəngəl" → Xəngəlation; "cheesecake" → bonbon patisserie.
 
 ## Karar bekleyenler (Ali)
 
-| Konu                                                      | Seçenekler                                                            | Durum              |
-| --------------------------------------------------------- | --------------------------------------------------------------------- | ------------------ |
-| Altın set (40 cümle + doğru mekanlar)                     | Ali yazar                                                             | ⏸ bekleniyor       |
-| Yorum derinliği                                           | 1 Ekim Apify kredisi / Apify ücretli plan / yatırım sonrası resmi API | ⏸ 1 Ekim varsayımı |
-| Tripadvisor anahtarı (kart gerekir)                       | aç / erteleme                                                         | ⏸ ertelendi        |
-| Veri yokken şehir kartları (Londra, NY, Barselona, Paris) | kalsın / kaldır / "yakında"                                           | ⏸ sonra sorulacak  |
+| Konu                                                        | Seçenekler                                                            | Durum                 |
+| ----------------------------------------------------------- | --------------------------------------------------------------------- | --------------------- |
+| Groq yedek LLM anahtarı (`GROQ_API_KEY`, ücretsiz, kartsız) | Ali açar, `.env` + Vercel                                             | ⏸ önerildi (15 Eylül) |
+| Altın set (40 cümle + doğru mekanlar)                       | Ali yazar                                                             | ⏸ bekleniyor          |
+| Yorum derinliği                                             | 1 Ekim Apify kredisi / Apify ücretli plan / yatırım sonrası resmi API | ⏸ 1 Ekim varsayımı    |
+| Tripadvisor anahtarı (kart gerekir)                         | aç / erteleme                                                         | ⏸ ertelendi           |
+| Veri yokken şehir kartları (Londra, NY, Barselona, Paris)   | kalsın / kaldır / "yakında"                                           | ⏸ sonra sorulacak     |
