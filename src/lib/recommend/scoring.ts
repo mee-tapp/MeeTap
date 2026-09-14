@@ -1,5 +1,6 @@
 import type { AmbianceTag, Category, Intent, Purpose } from "./intent.ts";
 import { CUISINE_KEYWORDS } from "./rule-parser.ts";
+import { FEATURE_LABEL, MEAL_LABEL, type Feature, type Meal } from "../catalog/taxonomy.ts";
 import type { VenueIntelligence } from "./venue-intelligence.ts";
 
 /**
@@ -38,6 +39,16 @@ export type Candidate = {
   rating_count: number;
   /** open-data confidence 0..1 (Overture); used as a quality prior when unrated */
   confidence?: number | null;
+  // ---- pilot catalog fields (src/lib/catalog/taxonomy.ts) ----
+  establishment_type?: string | null;
+  features?: string[] | null;
+  good_for?: string[] | null;
+  meals?: string[] | null;
+  /** Google rating and review count (venue_external) – real quality evidence. */
+  external_rating?: number | null;
+  external_review_count?: number | null;
+  /** How many stored real reviews mention the dish the user asked for. */
+  dish_mentions?: number | null;
   /** null = unknown (no opening hours data) */
   open_now: boolean | null;
   /** Real, validated review-derived evidence (see venue-intelligence.ts) –
@@ -71,7 +82,11 @@ const LOCAL_GENERIC_TAGS = ["local", "regional", "home_cooking", "lokanta", "esn
  * ("Kavkasioni – Gürcü Mətbəxi" with home_cooking, "Anadolu Restaurant" with
  * regional/kebab/turkish in Baku) is not the local cuisine. */
 function contradictsLocal(cityCuisine: string, have: string[], name: string): boolean {
-  const own = new Set([cityCuisine, ...(CUISINE_ALIASES[cityCuisine] ?? []), ...LOCAL_GENERIC_TAGS]);
+  const own = new Set([
+    cityCuisine,
+    ...(CUISINE_ALIASES[cityCuisine] ?? []),
+    ...LOCAL_GENERIC_TAGS,
+  ]);
   if (have.some((h) => !own.has(h))) return true;
   for (const [key, words] of Object.entries(CUISINE_KEYWORDS)) {
     if (key === cityCuisine) continue;
@@ -93,8 +108,14 @@ export const DEFAULT_WEIGHTS = {
   distance: 0.4,
   purpose: 1.6,
   weather: 0.8,
-  quality: 0.8,
+  // Real ratings now exist for every catalog venue: quality matters.
+  quality: 1.4,
   needs: 0.6,
+  // Concrete asks: a feature the place must have, the meal moment, a dish
+  // people actually mention in reviews.
+  features: 2.0,
+  meals: 0.6,
+  dish: 2.0,
   // Only ever non-null when (a) the feature flag is on, (b) the user actually
   // asked for something subjective, and (c) the venue has real review
   // evidence for it – see scoreVenueIntelligence. Otherwise this weight never
@@ -190,10 +211,15 @@ function phraseInName(name: string, phrase: string): boolean {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[^\\p{L}])${escaped}([^\\p{L}]|$)`, "iu").test(name);
 }
-export function venueKinds(c: Pick<Candidate, "name" | "category" | "raw_type">): Set<VenueKind> {
+export function venueKinds(
+  c: Pick<Candidate, "name" | "category" | "raw_type" | "establishment_type">,
+): Set<VenueKind> {
   const kinds = new Set<VenueKind>();
   const raw = (c.raw_type ?? "").toLowerCase();
   if (c.category === "Bars") kinds.add("bar");
+  const est = (c as { establishment_type?: string | null }).establishment_type;
+  if (est === "bar_pub" || est === "lounge_hookah") kinds.add("bar");
+  if (est === "quick_bites") kinds.add("fast_food");
   for (const kind of Object.keys(KIND_RAW_TYPES) as VenueKind[]) {
     if (KIND_RAW_TYPES[kind].includes(raw)) kinds.add(kind);
     if (KIND_NAME_WORDS[kind].some((w) => phraseInName(c.name, w))) kinds.add(kind);
@@ -210,6 +236,15 @@ const PURPOSE_KIND_RULES: Record<Purpose, { exclude: VenueKind[]; penalize: Venu
   study: { exclude: ["bar", "event_hall"], penalize: ["fast_food"] },
   alone: { exclude: ["event_hall"], penalize: ["bar"] },
   friends: { exclude: ["event_hall"], penalize: [] },
+};
+/** Catalog good_for keys that confirm a purpose (data, not inference). */
+const PURPOSE_GOOD_FOR: Record<Purpose, string[]> = {
+  date: ["date_romantic", "celebration"],
+  friends: ["friends_groups", "big_groups"],
+  study: ["solo_work"],
+  alone: ["solo_work"],
+  family: ["family_kids"],
+  business: ["business"],
 };
 const KIND_LABEL: Record<VenueKind, [string, string]> = {
   bar: ["bar/pub", "a bar"],
@@ -265,7 +300,7 @@ const CUISINE_ALIASES: Record<string, string[]> = {
 // --- component scores ---------------------------------------------------------
 
 export type ComponentKey = keyof Weights;
-export type ExcludeReason = "category" | "cuisine" | "open_now" | "purpose";
+export type ExcludeReason = "category" | "cuisine" | "open_now" | "purpose" | "features";
 export type ComponentResult = {
   /** 0..1, or null when the factor doesn't apply (weight dropped) */
   score: number | null;
@@ -382,8 +417,7 @@ function scoreCuisine(
   if (byData.length) parts.push(t(locale, `${labels(byData)} var`, `serves ${labels(byData)}`));
   if (byName.length)
     parts.push(t(locale, `${labels(byName)} (adına göre)`, `${labels(byName)} (by name)`));
-  if (byLocal.length)
-    parts.push(t(locale, "yerel mutfak", "local cuisine"));
+  if (byLocal.length) parts.push(t(locale, "yerel mutfak", "local cuisine"));
   let reason = parts.join(", ");
   if (missing.length)
     reason += t(locale, ` (${labels(missing)} bilgisi yok)`, ` (no ${labels(missing)} info)`);
@@ -625,7 +659,14 @@ function scorePurpose(intent: Intent, c: Candidate, locale: "tr" | "en"): Compon
     return { score: 0.2, reason: t(locale, KIND_LABEL[weak][0], KIND_LABEL[weak][1]) };
   }
 
-  // 2. Then how well its atmosphere fits.
+  // 2. Real evidence first: Google/Tripadvisor "good for" data or review profiles.
+  const goodFor = new Set(c.good_for ?? []);
+  const wantGoodFor = PURPOSE_GOOD_FOR[intent.purpose];
+  if (wantGoodFor.some((g) => goodFor.has(g))) {
+    return { score: 1, reason: t(locale, `${pl} iyi`, `good ${pl}`) };
+  }
+
+  // 3. Then how well its atmosphere fits.
   const want = PURPOSE_TAGS[intent.purpose];
   if (c.ambiance_tags.length === 0) return { score: 0.4 };
   const have = new Set(c.ambiance_tags);
@@ -682,6 +723,31 @@ function scoreWeather(
 }
 
 function scoreQuality(c: Candidate, locale: "tr" | "en"): ComponentResult {
+  // Catalog venues carry a real Google rating with hundreds of reviews –
+  // the strongest quality evidence we have. Same Bayesian shrinkage.
+  if (c.external_rating != null && (c.external_review_count ?? 0) > 0) {
+    const prior = 4.3; // Baku restaurants on Google average high – shrink towards that
+    const k = 50;
+    const n = c.external_review_count ?? 0;
+    const adj = (prior * k + c.external_rating * n) / (k + n);
+    const score = Math.max(0, Math.min(1, (adj - 3.5) / 1.4));
+    const count = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    const reason =
+      adj >= 4.6
+        ? t(
+            locale,
+            `Google ${c.external_rating} (${count} yorum)`,
+            `Google ${c.external_rating} (${count} reviews)`,
+          )
+        : adj <= 4.0
+          ? t(
+              locale,
+              `Google puanı düşük (${c.external_rating})`,
+              `low Google rating (${c.external_rating})`,
+            )
+          : undefined;
+    return { score, ...(reason ? { reason } : {}) };
+  }
   if (c.rating_avg == null || c.rating_count === 0) {
     // No community ratings yet: lean on how confident the open data is that
     // this is a real, current venue (low-confidence records sink).
@@ -700,6 +766,60 @@ function scoreQuality(c: Candidate, locale: "tr" | "en"): ComponentResult {
         ? t(locale, "puanı düşük", "low ratings")
         : undefined;
   return { score, ...(reason ? { reason } : {}) };
+}
+
+/** Every requested feature must be there (the engine already removed
+ * features no venue in the pool has data for, so a miss is a real miss). */
+function scoreFeatures(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+  if (intent.features.length === 0) return { score: null };
+  const have = new Set(c.features ?? []);
+  const hits = intent.features.filter((f) => have.has(f));
+  const label = (f: string) => FEATURE_LABEL[f as Feature]?.[locale === "tr" ? 0 : 1] ?? f;
+  if (hits.length === intent.features.length) {
+    return {
+      score: 1,
+      reason: t(locale, `${hits.map(label).join(", ")} var`, `has ${hits.map(label).join(", ")}`),
+    };
+  }
+  const missing = intent.features.filter((f) => !have.has(f));
+  return {
+    score: 0,
+    exclude: true,
+    reason: t(
+      locale,
+      `${missing.map(label).join(", ")} yok`,
+      `no ${missing.map(label).join(", ")}`,
+    ),
+  };
+}
+
+function scoreMeals(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+  if (intent.meals.length === 0) return { score: null };
+  const have = c.meals ?? [];
+  if (have.length === 0) return { score: 0.5 };
+  const hit = intent.meals.find((m) => have.includes(m));
+  if (hit) {
+    const label = MEAL_LABEL[hit as Meal][locale === "tr" ? 0 : 1];
+    return { score: 1, reason: t(locale, `${label} var`, `serves ${label}`) };
+  }
+  return { score: 0.3 };
+}
+
+/** A dish is confirmed by real reviews mentioning it (and signature_dishes). */
+function scoreDish(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
+  if (!intent.dish) return { score: null };
+  const n = c.dish_mentions ?? 0;
+  if (n > 0) {
+    return {
+      score: Math.min(1, 0.6 + 0.1 * n),
+      reason: t(
+        locale,
+        `yorumlarda "${intent.dish}" geçiyor (${n})`,
+        `"${intent.dish}" mentioned in ${n} reviews`,
+      ),
+    };
+  }
+  return { score: 0.2 };
 }
 
 function scoreNeeds(intent: Intent, c: Candidate, locale: "tr" | "en"): ComponentResult {
@@ -923,10 +1043,17 @@ export function scoreCandidate(
     weather: scoreWeather(intent, c, ctx, locale),
     quality: scoreQuality(c, locale),
     needs: scoreNeeds(intent, c, locale),
+    features: scoreFeatures(intent, c, locale),
+    meals: scoreMeals(intent, c, locale),
+    dish: scoreDish(intent, c, locale),
     review_intelligence: scoreVenueIntelligence(intent, c, locale),
   };
   if (results.purpose.exclude) {
     onExclude?.("purpose");
+    return null;
+  }
+  if (results.features.exclude) {
+    onExclude?.("features");
     return null;
   }
   if (Object.values(results).some((r) => r.exclude)) {

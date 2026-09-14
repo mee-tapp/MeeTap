@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getCurrentWeather, type CurrentWeather } from "../weather.ts";
 import { emptyIntent, type Intent, type Need, type ParsedIntent, type Purpose } from "./intent.ts";
+import { FEATURE_LABEL, MEAL_LABEL, type Feature, type Meal } from "../catalog/taxonomy.ts";
 import { parseIntentWithLlm } from "./llm-parser.ts";
 import { parseIntentWithRules } from "./rule-parser.ts";
 import {
@@ -13,6 +14,7 @@ import {
   labelCuisine,
   labelGoodFor,
   labelTag,
+  venueKinds,
   rankCandidates,
   type Candidate,
   type ExcludeReason,
@@ -58,7 +60,13 @@ export type RecommendInput = {
 export type RecommendDebug = {
   candidates_before: number;
   candidates_after_hard_filters: number;
-  hard_filter_exclusions: { category: number; cuisine: number; open_now: number; purpose: number };
+  hard_filter_exclusions: {
+    category: number;
+    cuisine: number;
+    open_now: number;
+    purpose: number;
+    features: number;
+  };
   fallback_used: string | null;
   mode: "discovery" | "named_venue";
 };
@@ -97,6 +105,7 @@ export type VenueRow = {
   external_review_count?: number | null;
   profile?: string | null;
   catalog_tier?: string | null;
+  good_for?: string[] | null;
 };
 
 export type Recommendation = {
@@ -193,6 +202,25 @@ function splitByCoverage(
     (ok ? applied : unverifiable).push(lbl(NEED_LABEL[need]));
     return ok;
   });
+  // Catalog features: a feature no venue in the pool carries cannot be checked.
+  const poolFeatures = new Set(pool.flatMap((c) => c.features ?? []));
+  const features = intent.features.filter((f) => {
+    const ok = poolFeatures.has(f);
+    (ok ? applied : unverifiable).push(lbl(FEATURE_LABEL[f as Feature]));
+    return ok;
+  });
+  const poolMeals = new Set(pool.flatMap((c) => c.meals ?? []));
+  const meals = intent.meals.filter((m) => {
+    const ok = poolMeals.has(m);
+    (ok ? applied : unverifiable).push(lbl(MEAL_LABEL[m as Meal]));
+    return ok;
+  });
+  let dish = intent.dish;
+  if (dish) {
+    const ok = pool.some((c) => (c.dish_mentions ?? 0) > 0);
+    (ok ? applied : unverifiable).push(lbl([`"${dish}"`, `"${dish}"`]));
+    if (!ok) dish = null;
+  }
 
   for (const c of intent.cuisines) applied.push(labelCuisine(c, locale));
   if (intent.purpose) applied.push(lbl(PURPOSE_LABEL[intent.purpose]));
@@ -216,7 +244,14 @@ function splitByCoverage(
   unverifiable.push(...intent.unmapped);
 
   return {
-    scoring: { ...intent, needs, ambiance: { ...intent.ambiance, all_of: allOf, any_of: anyOf } },
+    scoring: {
+      ...intent,
+      needs,
+      features,
+      meals,
+      dish,
+      ambiance: { ...intent.ambiance, all_of: allOf, any_of: anyOf },
+    },
     coverage: {
       applied: [...new Set(applied)],
       unverifiable: [...new Set(unverifiable)],
@@ -284,7 +319,11 @@ const BAND_ESTIMATE: Record<string, [number, number, number, number]> = {
   EUR: [8, 15, 30, 60],
 };
 
-function toCandidate(v: VenueRow, intelligence?: VenueIntelligence | null): Candidate {
+function toCandidate(
+  v: VenueRow,
+  intelligence?: VenueIntelligence | null,
+  dishMentions?: Map<string, number> | null,
+): Candidate {
   const table = BAND_ESTIMATE[v.currency ?? "TRY"] ?? BAND_ESTIMATE["TRY"]!;
   const bandEstimate = v.price_band != null ? (table[v.price_band - 1] ?? null) : null;
   return {
@@ -311,6 +350,13 @@ function toCandidate(v: VenueRow, intelligence?: VenueIntelligence | null): Cand
     raw_type: v.raw_type ?? null,
     open_now: null, // opening_hours parsing lands in Etap 1
     intelligence: intelligence ?? null,
+    establishment_type: v.establishment_type ?? null,
+    features: v.features ?? [],
+    good_for: v.good_for ?? [],
+    meals: v.meals ?? [],
+    external_rating: v.external_rating ?? null,
+    external_review_count: v.external_review_count ?? null,
+    dish_mentions: dishMentions?.get(v.id) ?? 0,
   };
 }
 
@@ -467,11 +513,42 @@ function detectQueryLocale(raw: string): "tr" | "en" {
   // Turkish / Azerbaijani function words and verb forms (typed with or without diacritics).
   const trWords =
     /\b(bir|için|icin|ucun|üçün|istiyorum|istiyoruz|isteyirem|istəyirəm|isteyirik|olsun|olsa|olmasin|olmasın|olmayan|olan|yerde|yerdə|yakin|yakın|sevgilim|sevgilimle|sevgilimlə|arkadaslarimla|arkadaşlarımla|ailemle|aileynen|ailəynən|gidecegim|gideceğim|gedecem|gedəcəm|gedek|gedirik|restoran|restorani|restoranı|kahve|yaxsi|yaxşı|bele|belə|axtariram|lazimdir)\b/;
-  const enWords = /\b(i|we|a|an|the|with|and|for|near|some|somewhere|place|want|looking|where|good|nice|cheap|quiet|my)\b/;
+  const enWords =
+    /\b(i|we|a|an|the|with|and|for|near|some|somewhere|place|want|looking|where|good|nice|cheap|quiet|my)\b/;
   if (trWords.test(text)) return "tr";
   // Diacritics alone are not enough: "near Kadıköy" is still an English sentence.
   if (/[çğıöşüəÇĞİÖŞÜƏ]/.test(raw) && !enWords.test(text)) return "tr";
   return "en";
+}
+
+/**
+ * How many stored real reviews of each venue in the city mention the dish
+ * (case/diacritic-insensitive substring), plus signature_dishes hits.
+ * One query, bounded; empty map when nothing mentions it.
+ */
+async function countDishMentions(
+  supabase: SupabaseClient,
+  dish: string,
+  city: string,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const needle = dish.replace(/[%_]/g, "");
+  const { data: reviews } = await supabase
+    .from("venue_reviews_external")
+    .select("venue_id, venues!inner(city)")
+    .eq("venues.city", city)
+    .ilike("body", `%${needle}%`)
+    .limit(2000);
+  for (const r of (reviews ?? []) as Array<{ venue_id: string }>)
+    counts.set(r.venue_id, (counts.get(r.venue_id) ?? 0) + 1);
+  const { data: sig } = await supabase
+    .from("venues")
+    .select("id")
+    .eq("city", city)
+    .contains("signature_dishes", [needle.toLowerCase()]);
+  for (const v of (sig ?? []) as Array<{ id: string }>)
+    counts.set(v.id, (counts.get(v.id) ?? 0) + 3);
+  return counts;
 }
 
 export async function recommend(input: RecommendInput): Promise<RecommendResult> {
@@ -613,29 +690,43 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   // 2. Real candidates near the user (PostGIS, server-side hard filters).
   const rpc = async (
     radius: number,
-    extra: { tags?: string[]; cuisines?: string[]; nameKeywords?: string[] } = {},
+    extra: {
+      tags?: string[];
+      cuisines?: string[];
+      nameKeywords?: string[];
+      features?: string[];
+    } = {},
     at: { lat: number; lon: number } = origin,
   ) => {
-    const { data, error } = await supabase.rpc("venues_nearby", {
-      p_lat: at.lat,
-      p_lon: at.lon,
-      p_radius_m: radius,
-      p_city: input.city,
-      // No category in the sentence, or the category was only *inferred* from
-      // a cuisine word (not stated) → food & drink broadly; Activities only
-      // when asked for (galleries and bookshops should not answer "a quiet place").
-      p_categories:
-        intent.categories.length && intent.category_explicit
-          ? intent.categories
-          : DEFAULT_CATEGORIES,
-      p_limit: 600,
-      p_tags: extra.tags ?? null,
-      p_cuisines: extra.cuisines ?? null,
-      p_name_keywords: extra.nameKeywords ?? null,
-      // Decision 2026-09-14: the recommender answers from the curated pilot
-      // catalog only (fully described, reviewed venues); open data is gone.
-      p_tier: CATALOG_TIER,
-    });
+    const call = () =>
+      supabase.rpc("venues_nearby", {
+        p_lat: at.lat,
+        p_lon: at.lon,
+        p_radius_m: radius,
+        p_city: input.city,
+        // No category in the sentence, or the category was only *inferred* from
+        // a cuisine word (not stated) → food & drink broadly; Activities only
+        // when asked for (galleries and bookshops should not answer "a quiet place").
+        p_categories:
+          intent.categories.length && intent.category_explicit
+            ? intent.categories
+            : DEFAULT_CATEGORIES,
+        p_limit: 600,
+        p_tags: extra.tags ?? null,
+        p_cuisines: extra.cuisines ?? null,
+        p_name_keywords: extra.nameKeywords ?? null,
+        p_features: extra.features ?? null,
+        // Decision 2026-09-14: the recommender answers from the curated pilot
+        // catalog only (fully described, reviewed venues); open data is gone.
+        p_tier: CATALOG_TIER,
+      });
+    let { data, error } = await call();
+    // Supabase occasionally answers "JWT issued at future" (clock skew at the
+    // gateway); it clears within a second, so one retry beats a failed search.
+    if (error && /issued at future/i.test(error.message)) {
+      await new Promise((r) => setTimeout(r, 1200));
+      ({ data, error } = await call());
+    }
     if (error) throw new Error(`venues_nearby: ${error.message}`);
     return (data ?? []) as VenueRow[];
   };
@@ -647,7 +738,14 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   // cooking" tags (see scoreCuisine) – pull those into the pool as well.
   const cuisineAliases = intent.cuisines.flatMap((c) =>
     c === center.cuisine
-      ? [...(CUISINE_POOL_ALIASES[c] ?? [c]), "local", "regional", "home_cooking", "lokanta", "esnaf"]
+      ? [
+          ...(CUISINE_POOL_ALIASES[c] ?? [c]),
+          "local",
+          "regional",
+          "home_cooking",
+          "lokanta",
+          "esnaf",
+        ]
       : (CUISINE_POOL_ALIASES[c] ?? [c]),
   );
   const nameKeywords = intent.cuisine_keywords.filter((k) => k.length >= 3);
@@ -666,6 +764,11 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
       nameKeywords.length
         ? rpc(Math.max(radius, 25000), { nameKeywords }, at)
         : Promise.resolve([]),
+      // A requested feature (kabinet, karaoke…) or a dish: find them city-wide.
+      intent.features.length
+        ? rpc(Math.max(radius, 25000), { features: intent.features }, at)
+        : Promise.resolve([]),
+      intent.dish ? rpc(25000, {}, at) : Promise.resolve([]),
     ]);
     const byId = new Map<string, VenueRow>();
     for (const set of sets) for (const row of set) byId.set(row.id, row);
@@ -689,7 +792,7 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   //    through the coverage split, so a wish the pool has no data for is
   //    reported instead of scored.
   const candidatesBeforeFilters = rows.length;
-  const exclusions = { category: 0, cuisine: 0, open_now: 0, purpose: 0 };
+  const exclusions = { category: 0, cuisine: 0, open_now: 0, purpose: 0, features: 0 };
   const tally = input.debug
     ? (reason: ExcludeReason) => {
         exclusions[reason] += 1;
@@ -697,8 +800,12 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
     : undefined;
   let coverage: Coverage = { applied: [], unverifiable: [] };
   let weights: Weights = DEFAULT_WEIGHTS;
+  // Dish evidence: real review texts (and signature_dishes) that mention it.
+  const dishMentions = intent.dish
+    ? await countDishMentions(supabase, intent.dish, input.city)
+    : null;
   const rankPool = (base: Intent, pool: VenueRow[], count?: typeof tally) => {
-    const candidates = pool.map((r) => toCandidate(r, intelMap.get(r.id)));
+    const candidates = pool.map((r) => toCandidate(r, intelMap.get(r.id), dishMentions));
     const split = splitByCoverage(base, candidates, locale);
     coverage = split.coverage;
     return rankCandidates(split.scoring, candidates, ctx, weights, count);
@@ -811,6 +918,11 @@ export async function recommend(input: RecommendInput): Promise<RecommendResult>
   if (intent.cuisines.length) {
     const serving = ranked.filter(serves);
     if (serving.length) ranked = serving;
+  }
+  // Same for a dish: places whose reviews mention it beat places that don't.
+  if (intent.dish) {
+    const mentioning = ranked.filter((s) => (s.candidate.dish_mentions ?? 0) > 0);
+    if (mentioning.length) ranked = mentioning;
   }
   // One entry per name: three branches of the same chain are one answer, not three.
   {

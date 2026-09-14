@@ -1,3 +1,4 @@
+import { FEATURES, MEALS } from "../catalog/taxonomy.ts";
 import {
   AMBIANCE_TAGS,
   CATEGORIES,
@@ -72,6 +73,9 @@ Return ONLY a JSON object with exactly these keys:
   "max_distance_min": number or null,
   "time": "now" | "tonight" | "tomorrow" | "weekend" | null,
   "needs": array from ${JSON.stringify(NEEDS)},
+  "features": array from ${JSON.stringify(FEATURES)} – concrete things the venue must HAVE: "kabinet / loca / özel oda / private room" → "private_room"; "karaoke" → "karaoke"; "canlı müzik" → "live_music"; "nargile / qəlyan" → "hookah"; "teras / bahçe / açık hava" → "outdoor_terrace"; "deniz manzarası" → "sea_view"; "çocuk alanı" → "kids_area"; "otopark" → "parking"; "helal" → "halal"; "tatlıları güzel olsun / şirniyyat" → "dessert_menu"; "alkol olmasın" → "no_alcohol"; "geç saate kadar açık" → "late_open".
+  "meals": array from ${JSON.stringify(MEALS)} – "kahvaltı" → breakfast, "öğle yemeği / nahar" → lunch, "akşam yemeği / şam yeməyi" → dinner, "gece geç saat" → late_night.
+  "dish": a specific dish or drink the user wants, lowercase, in the user's spelling ("xəngəl", "cheesecake", "dolma", "sac ichi", "filtre kahve"), or null. A dish is NOT a cuisine: "xəngəl yemek istiyorum" → dish "xəngəl", cuisines [] (do not guess "georgian"). Drinks are NOT dishes: "bira / şərab / kokteyl / çay / kahve" → features "serves_alcohol" / "wine_list" / "cocktails" / "tea_selection" / "specialty_coffee" and, for beer/cocktails/pub words, categories ["Bars"].
   "weather_sensitive": boolean (true if the sentence mentions weather),
   "unmapped": array of short strings – wishes you could not map to any field,
   "review_priorities": array from ${JSON.stringify(ASPECT_KEYS)} – subjective things the user cares about that only REAL reviews can confirm (e.g. "yemekleri iyi" → "food_quality", "servisi iyi" → "service"). This never filters venues, only ranks them – include it whenever relevant, even loosely.
@@ -90,6 +94,34 @@ Rules:
 - "cuisines" is only the MAIN kitchen the user wants to eat at (what kind of restaurant), main one FIRST. A side wish at that restaurant ("tatlıları güzel olsun", "dadlı şirniyyatlar olan", "kahvesi iyi olsun") is NOT a cuisine – put it in "unmapped". Make "dessert" / "coffee" a cuisine only when the user wants a dessert or coffee place itself.
 - Anything with no matching field or tag – private room / kabinet / loca, nargile, parking, pet friendly, karaoke, a specific dish, a celebration ("yıl dönümü") – goes into "unmapped" as a short phrase in the user's own language. NEVER approximate it with an ambiance tag, need or cuisine ("kabinet" is NOT "indoor"; "yıl dönümü" is NOT "romantic" unless the user said so).
 - Never invent constraints the user did not state. Prefer null / empty over guessing.`;
+
+const DRINK_FEATURE: Record<string, (typeof FEATURES)[number]> = {
+  bira: "serves_alcohol",
+  beer: "serves_alcohol",
+  pivə: "serves_alcohol",
+  pivo: "serves_alcohol",
+  şarap: "wine_list",
+  sarap: "wine_list",
+  şərab: "wine_list",
+  wine: "wine_list",
+  kokteyl: "cocktails",
+  cocktail: "cocktails",
+  cocktails: "cocktails",
+  rakı: "serves_alcohol",
+  raki: "serves_alcohol",
+  viski: "serves_alcohol",
+  whisky: "serves_alcohol",
+  votka: "serves_alcohol",
+  çay: "tea_selection",
+  cay: "tea_selection",
+  tea: "tea_selection",
+  kahve: "specialty_coffee",
+  kofe: "specialty_coffee",
+  coffee: "specialty_coffee",
+  latte: "specialty_coffee",
+  espresso: "specialty_coffee",
+};
+const DRINK_WORDS = new Set(Object.keys(DRINK_FEATURE));
 
 /** Dish words that appear in thousands of venue names – useless as cuisine keywords. */
 const GENERIC_DISH_WORDS = new Set([
@@ -197,6 +229,12 @@ export async function parseIntentWithLlm(
     // Name keywords: the curated dictionary wins when it knows the cuisine; the
     // model's list is only used for cuisines we have no dictionary entry for,
     // and never with generic dish words that would match half the city.
+    // A drink is never a "dish" (it would filter to reviews mentioning "bira").
+    if (intent.dish && DRINK_WORDS.has(intent.dish)) {
+      const feature = DRINK_FEATURE[intent.dish];
+      if (feature && !intent.features.includes(feature)) intent.features.push(feature);
+      intent.dish = null;
+    }
     if (rules.intent.cuisine_keywords.length) {
       intent.cuisine_keywords = rules.intent.cuisine_keywords;
     } else {

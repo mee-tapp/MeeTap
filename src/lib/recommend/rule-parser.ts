@@ -9,6 +9,7 @@ import {
   type Purpose,
 } from "./intent.ts";
 import type { AspectKey, CautionTag } from "./venue-intelligence.ts";
+import type { Feature, Meal } from "../catalog/taxonomy.ts";
 
 /**
  * Rule-based Turkish/English intent parser.
@@ -231,6 +232,86 @@ const AMBIANCE_DICT: Dict<AmbianceTag> = [
   [["gece gec", "gec saate", "gece acik", "late night", "gece hayati"], "late_night"],
   [["fine dining", "sik restoran", "lüks", "luks", "michelin", "gurme", "gourmet"], "fine_dining"],
   [["ucuz yemek", "sokak lezzeti", "street food", "cheap eats", "esnaf"], "cheap_eats"],
+];
+
+/** Catalog features (src/lib/catalog/taxonomy.ts) in Turkish / Azerbaijani / English. */
+const FEATURE_DICT: Dict<Feature> = [
+  [
+    [
+      "kabinet",
+      "kabine",
+      "loca",
+      "ozel oda",
+      "ozel bolum",
+      "private room",
+      "private dining",
+      "xususi otaq",
+      "ayri oda",
+    ],
+    "private_room",
+  ],
+  [["karaoke"], "karaoke"],
+  [["canli muzik", "canli musiqi", "live music", "muzikli"], "live_music"],
+  [["nargile", "qelyan", "hookah", "shisha"], "hookah"],
+  [
+    ["teras", "terrace", "acik hava", "acik havada", "bahce", "bahcede", "outdoor"],
+    "outdoor_terrace",
+  ],
+  [["cati", "rooftop", "roof"], "rooftop"],
+  [
+    [
+      "deniz manzarasi",
+      "deniz manzarali",
+      "denize baksin",
+      "sea view",
+      "deniz gorunsun",
+      "deniz manzaresi",
+    ],
+    "sea_view",
+  ],
+  [["manzarali", "sehir manzarasi", "city view"], "city_view"],
+  [["cocuk alani", "oyun alani", "cocuk parki", "kids area", "usaq meydancasi"], "kids_area"],
+  [["cocuk menusu", "kids menu", "usaq menyusu"], "kids_menu"],
+  [["otopark", "park yeri", "parking", "parkinq", "arabayla gidecegim"], "parking"],
+  [["wifi", "wi-fi", "internet"], "wifi"],
+  [["rezervasyon", "rezervasiya", "reservation"], "reservations"],
+  [
+    ["alkol olsun", "alkollu", "icki olsun", "sarap olsun", "bira olsun", "alkol servisi"],
+    "serves_alcohol",
+  ],
+  [["alkolsuz", "alkol olmasin", "icki olmasin"], "no_alcohol"],
+  [["helal", "halal"], "halal"],
+  [["vejetaryen", "vegetarian", "vegetaryen"], "vegetarian_options"],
+  [["vegan", "veqan"], "vegan_options"],
+  [["tekerlekli sandalye", "engelli", "wheelchair", "elil"], "wheelchair"],
+  [["evcil hayvan", "kopekle", "kopek", "pet friendly", "dog friendly"], "pet_friendly"],
+  [
+    ["gec saate kadar", "gece acik", "gece gec", "late night", "open late", "gece yarisi"],
+    "late_open",
+  ],
+  [["24 saat", "24/7"], "open_24h"],
+  [["paket servis", "eve siparis", "delivery", "catdirilma"], "delivery"],
+  [["kokteyl", "cocktail"], "cocktails"],
+  [["sarap listesi", "wine list", "sarap"], "wine_list"],
+  [
+    ["nitelikli kahve", "specialty coffee", "filtre kahve", "3. dalga", "third wave"],
+    "specialty_coffee",
+  ],
+  [["tatli", "tatlilari", "dessert", "sirniyyat", "desert"], "dessert_menu"],
+  [["cay cesitleri", "tea selection", "cay evi"], "tea_selection"],
+  [["somine", "fireplace", "kamin"], "fireplace"],
+  [["mac izlemek", "mac yayini", "sports bar", "mac var"], "tv_sports"],
+  [["masa oyunu", "board game", "kutu oyunu"], "board_games"],
+  [["sigara icilebilen", "sigara alani", "smoking"], "smoking_area"],
+  [["sigarasiz", "sigara icilmeyen", "non smoking", "non-smoking"], "non_smoking"],
+];
+
+const MEAL_DICT: Dict<Meal> = [
+  [["kahvalti", "kahvaltiya", "seher yemeyi", "breakfast", "sabah"], "breakfast"],
+  [["brunch", "branc"], "brunch"],
+  [["ogle yemegi", "oglen", "ogleyin", "nahar", "lunch"], "lunch"],
+  [["aksam yemegi", "aksam", "sam yemeyi", "dinner", "axsam"], "dinner"],
+  [["gece gec", "gece yarisi", "late night", "gec saat"], "late_night"],
 ];
 
 const NEED_DICT: Dict<Need> = [
@@ -615,6 +696,8 @@ export function parseIntentWithRules(raw: string): ParsedIntent {
     ]),
   ];
   intent.needs = findAll(text, NEED_DICT);
+  intent.features = findAll(text, FEATURE_DICT);
+  intent.meals = findAll(text, MEAL_DICT);
   intent.categories = findAll(text, CATEGORY_DICT);
   // A cuisine request implies a restaurant unless the user said café/bar. This is
   // a guess, not a stated category, so mark it non-explicit: retrieval should

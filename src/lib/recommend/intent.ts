@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FEATURES, MEALS } from "../catalog/taxonomy.ts";
 
 import { ASPECT_KEYS, CAUTION_TAGS } from "./venue-intelligence.ts";
 
@@ -142,6 +143,27 @@ export const IntentSchema = z.object({
   max_distance_min: z.number().positive().nullable().default(null),
   time: z.enum(["now", "tonight", "tomorrow", "weekend"]).nullable().default(null),
   needs: z.array(z.enum(NEEDS)).default([]),
+  /**
+   * Concrete, checkable venue features from the catalog taxonomy
+   * ("kabinet" → private_room, "karaoke", "canlı müzik" → live_music…).
+   * A requirement: when the pool has venues with the feature, only they
+   * qualify; when no venue has data for it, it is reported as unverifiable.
+   */
+  features: z.array(z.enum(FEATURES)).default([]),
+  /** Meal moment asked for ("kahvaltı", "öğle yemeği", "gece geç saat"). */
+  meals: z.array(z.enum(MEALS)).default([]),
+  /**
+   * A specific dish the user wants ("xəngəl", "cheesecake", "dolma") – free
+   * text, lowercase. Matched against signature_dishes and real review texts,
+   * never guessed into a cuisine.
+   */
+  dish: z
+    .string()
+    .min(2)
+    .max(40)
+    .nullable()
+    .default(null)
+    .transform((v) => (v ? v.trim().toLowerCase() : null)),
   /** True when the sentence mentions weather ("yağmur yağıyor") – scorer weighs weather more. */
   weather_sensitive: z.boolean().default(false),
   /** Free-text bits we could not map; surfaced to the LLM path and to logs. */

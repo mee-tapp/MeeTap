@@ -114,6 +114,12 @@ Kurallar:
 
 - **2026-09-12 (gece, 2)** — Ali: "mesafe sıralamayı belirlemesin, yıl dönümü için bar önerme". Mesafe ağırlığı 1.1 → 0.4, istenen mutfak/ortam şehir genelinde aranıyor; amaç–mekan tipi kuralı eklendi (bar/pub/nargile, fast food/büfe, düğün salonu randevu/iş için elenir; aile/çalışma için bar elenir). Aynı cümle Bakü'de artık Sumakh / Мимино / Dolma; "Sahil Bar & Restaurant" ve "Nargile Çay Evi" tipi sonuçlar randevu için aday olamıyor. Konum uzaksa şehir merkezi havuzu da aday, mesafe puanı yumuşak azalıyor, tarayıcı konum doğruluğu kaydediliyor.
 
+## NEREDE KALDIK (2026-09-14, gece)
+
+Katalog canlı: Apify ile 771 aday (merkez + Bilgəh/Mərdəkan/Novxanı/Nardaran), otomatik seçimle 181 mekan, yerel `gosom/google-maps-scraper` ile yorumlar (mekan başına ~5–8), Google puanı ve yorum sayısı, Azerice olanaklar (kabinet = "Xüsusi nahar otağı"). 180 mekan + 900 yorum Supabase'de (`catalog_tier='pilot'`). Motor kapalı şemaya geçti: `features` (kabinet, karaoke, canlı müzik…), `meals`, `dish` (yorum metinlerinde arama: "xəngəl" → Xəngəlation), Google puanı kalite sinyali, `good_for` verisi amaç kanıtı. Test seti: kurallar 25/25, DeepSeek 25/25.
+
+Sürüyor: 181 mekanın tek eşzamanlılıkla yeniden çekimi (daha zengin olanaklar), 59 kafe/tatlıcının tam çekimi. Sonra: kafe ekleme, LLM profil (imza yemekler), Ali'nin 40 cümlelik altın seti.
+
 ## NEREDE KALDIK (2026-09-14)
 
 Ali'nin kararı: 87k açık veri silinir; Bakü'de 250–300 yorumu bol mekanla kapalı şemalı katalog; kaynaklar Google Places API + Apify yorumları + Tripadvisor API; Bakü dışı gidilir mekanlar dahil; öneri sistemi Ali + Claude. Plan: `docs/MEETAP-PILOT-CATALOG-PLAN.md`.
