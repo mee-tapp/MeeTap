@@ -265,7 +265,7 @@ for (const row of selected) {
                           rating_avg, rating_count, catalog_updated_at)
       values (${v.slug + "-" + v.google_place_id.slice(-6).toLowerCase()}, ${v.name}, ${v.category}, ${v.raw_type}, ${v.cuisines}, ${city}, ${v.district}, ${v.address},
               st_setsrid(st_makepoint(${v.lon}, ${v.lat}), 4326)::geography, ${v.lat}, ${v.lon},
-              ${v.opening_hours}, ${v.outdoor_seating}, ${v.website}, ${v.phone}, ${v.price_band}, ${v.price_band ? "google" : null}, ${currency},
+              ${v.opening_hours}, ${v.outdoor_seating}, ${v.website}, ${v.phone}, ${v.price_band}, ${v.price_band ? "source" : null}, ${currency},
               'pilot', ${v.establishment_type}, ${v.meals}, ${v.features}, ${v.good_for},
               ${v.google_place_id}, ${v.google_maps_url}, ${v.editorial_summary}, ${v.rating}, ${v.review_count},
               null, 0, now())
